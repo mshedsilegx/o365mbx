@@ -1,0 +1,4 @@
+*.bak_*
+COMMON.md
+GEMINI.md
+build.sh
