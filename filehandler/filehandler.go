@@ -19,12 +19,12 @@ import (
 
 type FileHandler struct {
 	workspacePath            string
-	o365Client               *o365client.O365Client // Reverted to concrete type
-	largeAttachmentThreshold int                    // in bytes
-	chunkSize                int                    // in bytes
+	o365Client               o365client.O365ClientInterface
+	largeAttachmentThreshold int // in bytes
+	chunkSize                int // in bytes
 }
 
-func NewFileHandler(workspacePath string, o365Client *o365client.O365Client, largeAttachmentThresholdMB, chunkSizeMB int) *FileHandler {
+func NewFileHandler(workspacePath string, o365Client o365client.O365ClientInterface, largeAttachmentThresholdMB, chunkSizeMB int) *FileHandler {
 	return &FileHandler{
 		workspacePath:            workspacePath,
 		o365Client:               o365Client,

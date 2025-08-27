@@ -139,14 +139,18 @@ func main() {
 			rng,
 		)
 
-		runConnectMode(ctx, o365Client, *mailboxName)
+		runHealthCheckMode(ctx, o365Client, *mailboxName)
 		os.Exit(0) // Exit after health check
 	}
 
-	// --- Normal Download Mode (rest of the original main function) ---
+	// Normal Download Mode
+	runDownloadMode(ctx, cfg, *accessToken, *mailboxName, *workspacePath, rng)
+}
 
+// runDownloadMode handles the main logic for downloading emails and attachments.
+func runDownloadMode(ctx context.Context, cfg *Config, accessToken, mailboxName, workspacePath string, rng *rand.Rand) {
 	// Argument validation specific to download mode
-	if err := validateWorkspacePath(*workspacePath); err != nil {
+	if err := validateWorkspacePath(workspacePath); err != nil {
 		if fsErr, ok := err.(*apperrors.FileSystemError); ok {
 			log.WithFields(log.Fields{
 				"argument": "workspacePath",
@@ -169,7 +173,7 @@ func main() {
 
 	// Initialize components
 	o365Client := o365client.NewO365Client(
-		*accessToken,
+		accessToken,
 		time.Duration(cfg.HTTPClientTimeoutSeconds)*time.Second,
 		cfg.MaxRetries,
 		cfg.InitialBackoffSeconds,
@@ -179,14 +183,14 @@ func main() {
 	)
 	emailProcessor := emailprocessor.NewEmailProcessor()
 	fileHandler := filehandler.NewFileHandler(
-		*workspacePath,
+		workspacePath,
 		o365Client,
 		cfg.LargeAttachmentThresholdMB,
 		cfg.ChunkSizeMB,
 	)
 
 	// 1. Create workspace
-	err = fileHandler.CreateWorkspace()
+	err := fileHandler.CreateWorkspace()
 	if err != nil {
 		if fsErr, ok := err.(*apperrors.FileSystemError); ok {
 			log.Fatalf("Critical file system error: %s (Path: %s, Original: %v)", fsErr.Msg, fsErr.Path, fsErr.Unwrap())
@@ -194,7 +198,7 @@ func main() {
 			log.Errorf("Error creating workspace: %v", err)
 		}
 	}
-	log.WithField("path", *workspacePath).Infof("Workspace created.")
+	log.WithField("path", workspacePath).Infof("Workspace created.")
 
 	// Load last run timestamp
 	var lastRunTimestamp string
@@ -214,7 +218,7 @@ func main() {
 
 	// 2. Fetch emails
 	var messages []o365client.Message
-	messages, err = o365Client.GetMessages(ctx, *mailboxName, lastRunTimestamp)
+	messages, err = o365Client.GetMessages(ctx, mailboxName, lastRunTimestamp)
 	if err != nil {
 		switch e := err.(type) {
 		case *apperrors.APIError:
@@ -282,7 +286,7 @@ func main() {
 			// Download and save attachments
 			if msg.HasAttachments {
 				var attachments []o365client.Attachment
-				attachments, err = o365Client.GetAttachments(ctx, *mailboxName, msg.ID)
+				attachments, err = o365Client.GetAttachments(ctx, mailboxName, msg.ID)
 				if err != nil {
 					switch e := err.(type) {
 					case *apperrors.APIError:
@@ -326,7 +330,7 @@ func main() {
 					go func(att o365client.Attachment) {
 						defer attWg.Done()
 						log.WithFields(log.Fields{"attachmentName": att.Name, "messageID": msg.ID}).Infof("Downloading attachment.")
-						err = fileHandler.SaveAttachment(ctx, att.Name, msg.ID, att.DownloadURL, *accessToken, att.Size)
+						err = fileHandler.SaveAttachment(ctx, att.Name, msg.ID, att.DownloadURL, accessToken, att.Size)
 						if err != nil {
 							switch e := err.(type) {
 							case *apperrors.FileSystemError:
@@ -406,7 +410,8 @@ func main() {
 	log.Info("Application finished.")
 }
 
-func runConnectMode(ctx context.Context, client *o365client.O365Client, mailboxName string) {
+// runHealthCheckMode handles the logic for the health check mode.
+func runHealthCheckMode(ctx context.Context, client *o365client.O365Client, mailboxName string) {
 	log.WithField("mailbox", mailboxName).Info("Attempting to connect to mailbox and retrieve statistics...")
 
 	messageCount, err := client.GetMailboxStatistics(ctx, mailboxName)
