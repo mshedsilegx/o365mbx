@@ -16,18 +16,6 @@ func NewEmailProcessor() *EmailProcessor {
 	return &EmailProcessor{}
 }
 
-// unescapeHTML unescapes common HTML entities.
-func unescapeHTML(s string) string {
-	s = strings.ReplaceAll(s, "&amp;", "&")
-	s = strings.ReplaceAll(s, "&lt;", "<")
-	s = strings.ReplaceAll(s, "&gt;", ">")
-	s = strings.ReplaceAll(s, "&quot;", "\"")
-	s = strings.ReplaceAll(s, "&#39;", "'")
-	s = strings.ReplaceAll(s, "&nbsp;", " ")
-	// Add more entities as needed
-	return s
-}
-
 // CleanHTML converts HTML content to plain text and removes special characters.
 func (ep *EmailProcessor) CleanHTML(htmlContent string) (string, error) {
 	doc, err := html.Parse(strings.NewReader(htmlContent))
@@ -109,7 +97,7 @@ func (ep *EmailProcessor) CleanHTML(htmlContent string) (string, error) {
 		}
 
 		if n.Type == html.TextNode {
-			text := unescapeHTML(n.Data) // Unescape HTML entities
+			text := html.UnescapeString(n.Data) // Unescape HTML entities
 			text = strings.TrimSpace(text)
 			if text != "" {
 				// Add a space before the text if the builder is not empty and the last char is not a space or newline
