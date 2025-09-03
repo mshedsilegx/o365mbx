@@ -23,20 +23,24 @@ type FileHandler struct {
 	o365Client               o365client.O365ClientInterface
 	largeAttachmentThreshold int // in bytes
 	chunkSize                int // in bytes
+	dirPerms                 os.FileMode
+	filePerms                os.FileMode
 }
 
-func NewFileHandler(workspacePath string, o365Client o365client.O365ClientInterface, largeAttachmentThresholdMB, chunkSizeMB int) *FileHandler {
+func NewFileHandler(workspacePath string, o365Client o365client.O365ClientInterface, largeAttachmentThresholdMB, chunkSizeMB int, dirPerms, filePerms int) *FileHandler {
 	return &FileHandler{
 		workspacePath:            workspacePath,
 		o365Client:               o365Client,
 		largeAttachmentThreshold: largeAttachmentThresholdMB * 1024 * 1024,
 		chunkSize:                chunkSizeMB * 1024 * 1024,
+		dirPerms:                 os.FileMode(dirPerms),
+		filePerms:                os.FileMode(filePerms),
 	}
 }
 
 // CreateWorkspace creates the unique workspace directory.
 func (fh *FileHandler) CreateWorkspace() error {
-	err := os.MkdirAll(fh.workspacePath, 0755)
+	err := os.MkdirAll(fh.workspacePath, fh.dirPerms)
 	if err != nil {
 		return &apperrors.FileSystemError{Path: fh.workspacePath, Msg: "failed to create workspace directory", Err: err}
 	}
@@ -77,7 +81,7 @@ func (fh *FileHandler) SaveEmailAsJSON(messageID string, data EmailData) error {
 		return fmt.Errorf("failed to marshal email data to JSON: %w", err)
 	}
 
-	err = os.WriteFile(filePath, jsonData, 0644)
+	err = os.WriteFile(filePath, jsonData, fh.filePerms)
 	if err != nil {
 		return &apperrors.FileSystemError{Path: filePath, Msg: "failed to save email JSON file", Err: err}
 	}
@@ -89,7 +93,7 @@ func (fh *FileHandler) SaveAttachment(ctx context.Context, attachmentName, messa
 	fileName := fmt.Sprintf("%s_%s_%s", sanitizeFileName(attachmentName), messageID, attachmentName)
 	filePath := filepath.Join(fh.workspacePath, fileName)
 
-	out, err := os.Create(filePath)
+	out, err := os.OpenFile(filePath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, fh.filePerms)
 	if err != nil {
 		return "", &apperrors.FileSystemError{Path: filePath, Msg: "failed to create file for attachment", Err: err}
 	}
@@ -200,7 +204,7 @@ func (fh *FileHandler) SaveAttachment(ctx context.Context, attachmentName, messa
 // SaveLastRunTimestamp saves the timestamp of the last successful run.
 func (fh *FileHandler) SaveLastRunTimestamp(timestamp string) error {
 	filePath := filepath.Join(fh.workspacePath, "last_run_timestamp.txt")
-	err := os.WriteFile(filePath, []byte(timestamp), 0644)
+	err := os.WriteFile(filePath, []byte(timestamp), fh.filePerms)
 	if err != nil {
 		return &apperrors.FileSystemError{Path: filePath, Msg: "failed to save last run timestamp", Err: err}
 	}

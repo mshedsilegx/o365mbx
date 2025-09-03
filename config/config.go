@@ -1,4 +1,4 @@
-package main
+package config
 
 import (
 	"encoding/json"
@@ -27,10 +27,18 @@ type Config struct {
 	MaxParallelDownloads       int     `json:"maxParallelDownloads"`
 	APICallsPerSecond          float64 `json:"apiCallsPerSecond"`
 	APIBurst                   int     `json:"apiBurst"`
+	DirPerms                   int     `json:"dirPerms"`
+	FilePerms                  int     `json:"filePerms"`
 }
 
 // SetDefaults sets default values for the configuration parameters.
 func (c *Config) SetDefaults() {
+	if c.DirPerms == 0 {
+		c.DirPerms = 0755
+	}
+	if c.FilePerms == 0 {
+		c.FilePerms = 0644
+	}
 	if c.ProcessedFolder == "" {
 		c.ProcessedFolder = "processed"
 	}
