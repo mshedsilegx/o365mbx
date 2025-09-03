@@ -10,6 +10,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -66,6 +67,7 @@ func main() {
 	mailboxName := flag.String("mailbox", "", "Mailbox name (e.g., name@domain.com)")
 	workspacePath := flag.String("workspace", "", "Unique folder to store all artifacts")
 	processedFolder := flag.String("processed-folder", "", "Folder to move processed emails to")
+	errorFolder := flag.String("error-folder", "", "Folder to move emails that failed to process")
 	timeoutSeconds := flag.Int("timeout", 0, "HTTP client timeout in seconds")
 	maxParallelDownloads := flag.Int("parallel", 0, "Maximum number of parallel downloads")
 	apiCallsPerSecond := flag.Float64("api-rate", 0, "API calls per second for client-side rate limiting (default: 5.0)")
@@ -94,6 +96,9 @@ func main() {
 	}
 	if *processedFolder != "" {
 		cfg.ProcessedFolder = *processedFolder
+	}
+	if *errorFolder != "" {
+		cfg.ErrorFolder = *errorFolder
 	}
 	if *timeoutSeconds != 0 {
 		cfg.HTTPClientTimeoutSeconds = *timeoutSeconds
@@ -271,6 +276,11 @@ func runDownloadMode(ctx context.Context, cfg *Config, rng *rand.Rand) {
 		log.Fatalf("Failed to get processed folder ID: %v", err)
 	}
 
+	errorFolderID, err := o365Client.GetFolderID(ctx, cfg.MailboxName, cfg.ErrorFolder)
+	if err != nil {
+		log.Fatalf("Failed to get error folder ID: %v", err)
+	}
+
 	for _, msg := range messages {
 		wg.Add(1)
 		semaphore <- struct{}{}
@@ -281,157 +291,99 @@ func runDownloadMode(ctx context.Context, cfg *Config, rng *rand.Rand) {
 
 			log.WithFields(log.Fields{"messageID": msg.ID, "subject": msg.Subject}).Infof("Processing message.")
 
-			var cleanedBody string
-			cleanedBody, err = emailProcessor.CleanHTML(msg.Body.Content)
+			var errs []string
+			var attachmentData []filehandler.AttachmentData
+
+			// 1. Clean Body
+			cleanedBody, err := emailProcessor.CleanHTML(msg.Body.Content)
 			if err != nil {
-				log.WithFields(log.Fields{"messageID": msg.ID, "error": err}).Warn("Failed to clean HTML for message.")
-				cleanedBody = msg.Body.Content // Use original if cleaning fails
+				errs = append(errs, fmt.Sprintf("HTML cleaning failed: %v", err))
+				cleanedBody = msg.Body.Content // Use original on failure
 			}
 
+			// 2. Process Attachments
+			if msg.HasAttachments {
+				attachments, err := o365Client.GetAttachments(ctx, cfg.MailboxName, msg.ID)
+				if err != nil {
+					errs = append(errs, fmt.Sprintf("Failed to get attachment list: %v", err))
+				} else {
+					var attWg sync.WaitGroup
+					for _, att := range attachments {
+						attWg.Add(1)
+						go func(att o365client.Attachment) {
+							defer attWg.Done()
+							newFileName, err := fileHandler.SaveAttachment(ctx, att.Name, msg.ID, att.DownloadURL, cfg.AccessToken, att.Size)
+							if err != nil {
+								mu.Lock()
+								errs = append(errs, fmt.Sprintf("Failed to save attachment '%s': %v", att.Name, err))
+								mu.Unlock()
+							} else {
+								mu.Lock()
+								attachmentData = append(attachmentData, filehandler.AttachmentData{
+									Name:        att.Name,
+									Size:        att.Size,
+									DownloadURL: newFileName,
+								})
+								mu.Unlock()
+							}
+						}(att)
+					}
+					attWg.Wait()
+				}
+			}
+
+			// 3. Determine final status
+			status := filehandler.StatusData{}
+			isError := len(errs) > 0
+			if isError {
+				status.State = "error"
+				status.Details = strings.Join(errs, "; ")
+			} else {
+				status.State = "success"
+				status.Details = "Message processed successfully."
+			}
+
+			// 4. Create and save the JSON report
 			emailData := filehandler.EmailData{
 				To:           make([]string, len(msg.ToRecipients)),
 				From:         msg.From.EmailAddress.Address,
 				Subject:      msg.Subject,
 				ReceivedDate: msg.ReceivedDateTime.Format(time.RFC3339),
 				Body:         cleanedBody,
-				Attachments:  []filehandler.AttachmentData{},
+				Attachments:  attachmentData,
+				Status:       status,
 			}
 			for i, recipient := range msg.ToRecipients {
 				emailData.To[i] = recipient.EmailAddress.Address
 			}
 
-			// Download and save attachments
-			if msg.HasAttachments {
-				var attachments []o365client.Attachment
-				attachments, err = o365Client.GetAttachments(ctx, cfg.MailboxName, msg.ID)
-				if err != nil {
-					switch e := err.(type) {
-					case *apperrors.APIError:
-						log.WithFields(log.Fields{
-							"messageID":  msg.ID,
-							"errorType":  "APIError",
-							"statusCode": e.StatusCode,
-						}).Errorf("O365 API error fetching attachments: %s", e.Msg)
-					case *apperrors.AuthError:
-						log.WithFields(log.Fields{
-							"messageID": msg.ID,
-							"errorType": "AuthError",
-						}).Errorf("Authentication failed for attachments: %s", e.Msg)
-					default:
-						// Check for context cancellation errors
-						if errors.Is(err, context.Canceled) {
-							log.WithFields(log.Fields{
-								"messageID": msg.ID,
-								"errorType": "ContextCanceled",
-							}).Errorf("Attachment fetching cancelled by user.")
-						} else if errors.Is(err, context.DeadlineExceeded) {
-							log.WithFields(log.Fields{
-								"messageID": msg.ID,
-								"errorType": "ContextDeadlineExceeded",
-							}).Errorf("Attachment fetching timed out.")
-						} else {
-							log.WithFields(log.Fields{
-								"messageID": msg.ID,
-								"errorType": "UnknownError",
-								"error":     err,
-							}).Errorf("Unknown error fetching attachments.")
-						}
-					}
-					return // Skip attachments for this message if fetching fails
+			jsonSaveErr := fileHandler.SaveEmailAsJSON(msg.ID, emailData)
+			if jsonSaveErr != nil {
+				isError = true
+				log.Errorf("CRITICAL: Failed to save JSON report for msg %s: %v", msg.ID, jsonSaveErr)
+			}
+
+			// 5. Move the email
+			var moveErr error
+			if isError {
+				moveErr = o365Client.MoveMessage(ctx, cfg.MailboxName, msg.ID, errorFolderID)
+			} else {
+				moveErr = o365Client.MoveMessage(ctx, cfg.MailboxName, msg.ID, processedFolderID)
+			}
+
+			if moveErr != nil {
+				log.Errorf("CRITICAL: Failed to move message %s to target folder: %v", msg.ID, moveErr)
+				return // Don't update timestamp if move fails
+			}
+
+			// 6. Update timestamp only on complete success
+			if !isError {
+				mu.Lock()
+				if msg.ReceivedDateTime.After(latestTimestamp) {
+					latestTimestamp = msg.ReceivedDateTime
 				}
-				log.WithFields(log.Fields{"count": len(attachments), "messageID": msg.ID}).Infof("Found attachments.")
-
-				var attWg sync.WaitGroup // WaitGroup for attachments within this message
-				for _, att := range attachments {
-					attWg.Add(1)
-					go func(att o365client.Attachment) {
-						defer attWg.Done()
-						log.WithFields(log.Fields{"attachmentName": att.Name, "messageID": msg.ID}).Infof("Downloading attachment.")
-						newFileName, err := fileHandler.SaveAttachment(ctx, att.Name, msg.ID, att.DownloadURL, cfg.AccessToken, att.Size)
-						if err != nil {
-							switch e := err.(type) {
-							case *apperrors.FileSystemError:
-								log.WithFields(log.Fields{
-									"attachmentName": att.Name,
-									"messageID":      msg.ID,
-									"errorType":      "FileSystemError",
-									"path":           e.Path,
-									"error":          e.Unwrap(),
-								}).Errorf("File system error saving attachment: %s", e.Msg)
-							case *apperrors.APIError:
-								log.WithFields(log.Fields{
-									"attachmentName": att.Name,
-									"messageID":      msg.ID,
-									"errorType":      "APIError",
-									"statusCode":     e.StatusCode,
-								}).Errorf("API error downloading attachment: %s", e.Msg)
-							default:
-								if errors.Is(err, context.Canceled) {
-									log.WithFields(log.Fields{
-										"attachmentName": att.Name,
-										"messageID":      msg.ID,
-										"errorType":      "ContextCanceled",
-									}).Errorf("Attachment download cancelled by user.")
-								} else if errors.Is(err, context.DeadlineExceeded) {
-									log.WithFields(log.Fields{
-										"attachmentName": att.Name,
-										"messageID":      msg.ID,
-										"errorType":      "ContextDeadlineExceeded",
-									}).Errorf("Attachment download timed out.")
-								} else {
-									log.WithFields(log.Fields{
-										"attachmentName": att.Name,
-										"messageID":      msg.ID,
-										"errorType":      "UnknownError",
-										"error":          err,
-									}).Errorf("Unknown error saving attachment.")
-								}
-							}
-						} else {
-							mu.Lock()
-							emailData.Attachments = append(emailData.Attachments, filehandler.AttachmentData{
-								Name:        att.Name,
-								Size:        att.Size,
-								DownloadURL: newFileName,
-							})
-							mu.Unlock()
-						}
-					}(att)
-				}
-				attWg.Wait() // Wait for all attachments of this message to complete
+				mu.Unlock()
 			}
-
-			err = fileHandler.SaveEmailAsJSON(msg.ID, emailData)
-			if err != nil {
-				if fsErr, ok := err.(*apperrors.FileSystemError); ok {
-					log.WithFields(log.Fields{
-						"messageID": msg.ID,
-						"path":      fsErr.Path,
-						"error":     fsErr.Unwrap(),
-					}).Errorf("File system error saving email JSON: %s", fsErr.Msg)
-				} else {
-					log.WithFields(log.Fields{
-						"messageID": msg.ID,
-						"error":     err,
-					}).Errorf("Error saving email JSON.")
-				}
-				return // Do not move message if saving fails
-			}
-
-			// Move the message to the processed folder
-			err = o365Client.MoveMessage(ctx, cfg.MailboxName, msg.ID, processedFolderID)
-			if err != nil {
-				log.WithFields(log.Fields{"messageID": msg.ID, "error": err}).Errorf("Failed to move message.")
-				return // Do not update timestamp if move fails
-			}
-
-			// Update latestTimestamp safely
-			mu.Lock()
-			if msg.ReceivedDateTime.After(latestTimestamp) {
-				latestTimestamp = msg.ReceivedDateTime
-			}
-			mu.Unlock()
-
 		}(msg)
 	}
 

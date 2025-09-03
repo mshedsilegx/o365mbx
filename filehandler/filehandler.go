@@ -50,6 +50,12 @@ type AttachmentData struct {
 	DownloadURL string `json:"downloadUrl"`
 }
 
+// StatusData defines the structure for processing status in the JSON output.
+type StatusData struct {
+	State   string `json:"state"`
+	Details string `json:"details"`
+}
+
 // EmailData defines the structure for the JSON output file.
 type EmailData struct {
 	To           []string         `json:"to"`
@@ -58,6 +64,7 @@ type EmailData struct {
 	ReceivedDate string           `json:"receivedDate"`
 	Body         string           `json:"body"`
 	Attachments  []AttachmentData `json:"attachments"`
+	Status       StatusData       `json:"status"`
 }
 
 // SaveEmailAsJSON saves the email data as a JSON file.

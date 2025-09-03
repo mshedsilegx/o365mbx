@@ -13,6 +13,7 @@ type Config struct {
 	MailboxName                string  `json:"mailboxName"`
 	WorkspacePath              string  `json:"workspacePath"`
 	ProcessedFolder            string  `json:"processedFolder"`
+	ErrorFolder                string  `json:"errorFolder"`
 	HTTPClientTimeoutSeconds   int     `json:"httpClientTimeoutSeconds"`
 	MaxRetries                 int     `json:"maxRetries"`
 	InitialBackoffSeconds      int     `json:"initialBackoffSeconds"`
@@ -27,6 +28,9 @@ type Config struct {
 func (c *Config) SetDefaults() {
 	if c.ProcessedFolder == "" {
 		c.ProcessedFolder = "processed"
+	}
+	if c.ErrorFolder == "" {
+		c.ErrorFolder = "error"
 	}
 	if c.HTTPClientTimeoutSeconds == 0 {
 		c.HTTPClientTimeoutSeconds = 120
