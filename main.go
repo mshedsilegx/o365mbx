@@ -462,7 +462,9 @@ func runDownloadMode(ctx context.Context, cfg *Config, accessToken, mailboxName,
 
 	// Save latest timestamp for next run only in incremental mode and if new messages were processed
 	if processingMode == "incremental" && !latestTimestamp.IsZero() {
-		err = fileHandler.SaveLastRunTimestamp(latestTimestamp.Format(time.RFC3339Nano), stateFilePath)
+		timestampStr := latestTimestamp.Format(time.RFC3339Nano)
+		log.WithField("timestamp", timestampStr).Debugln("Saving new timestamp to state file.")
+		err = fileHandler.SaveLastRunTimestamp(timestampStr, stateFilePath)
 		if err != nil {
 			if fsErr, ok := err.(*apperrors.FileSystemError); ok {
 				log.WithFields(log.Fields{
