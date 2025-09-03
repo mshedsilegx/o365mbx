@@ -3,6 +3,7 @@ package filehandler
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -11,12 +12,19 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 
 	log "github.com/sirupsen/logrus"
 
 	"o365mbx/apperrors"
 	"o365mbx/o365client"
 )
+
+// RunState represents the state of the last successful incremental run.
+type RunState struct {
+	LastRunTimestamp time.Time `json:"lastRunTimestamp"`
+	LastMessageID    string    `json:"lastMessageId"`
+}
 
 type FileHandler struct {
 	workspacePath            string
@@ -186,25 +194,35 @@ func (fh *FileHandler) SaveAttachmentFromBytes(attachmentName, messageID, conten
 	return nil
 }
 
-// SaveLastRunTimestamp saves the timestamp of the last successful run.
-func (fh *FileHandler) SaveLastRunTimestamp(timestamp, stateFilePath string) error {
-	err := os.WriteFile(stateFilePath, []byte(timestamp), 0644)
+// SaveState saves the RunState to the given file path as JSON.
+func (fh *FileHandler) SaveState(state *RunState, stateFilePath string) error {
+	data, err := json.Marshal(state)
 	if err != nil {
-		return &apperrors.FileSystemError{Path: stateFilePath, Msg: "failed to save last run timestamp", Err: err}
+		return fmt.Errorf("failed to marshal state to JSON: %w", err)
+	}
+	err = os.WriteFile(stateFilePath, data, 0644)
+	if err != nil {
+		return &apperrors.FileSystemError{Path: stateFilePath, Msg: "failed to save state file", Err: err}
 	}
 	return nil
 }
 
-// LoadLastRunTimestamp loads the timestamp of the last successful run.
-func (fh *FileHandler) LoadLastRunTimestamp(stateFilePath string) (string, error) {
+// LoadState loads the RunState from the given file path.
+func (fh *FileHandler) LoadState(stateFilePath string) (*RunState, error) {
 	content, err := os.ReadFile(stateFilePath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return "", nil // File does not exist, first run
+			return &RunState{}, nil // File does not exist, return empty state
 		}
-		return "", &apperrors.FileSystemError{Path: stateFilePath, Msg: "failed to read last run timestamp file", Err: err}
+		return nil, &apperrors.FileSystemError{Path: stateFilePath, Msg: "failed to read state file", Err: err}
 	}
-	return strings.TrimSpace(string(content)), nil
+
+	var state RunState
+	err = json.Unmarshal(content, &state)
+	if err != nil {
+		return nil, fmt.Errorf("failed to unmarshal state from JSON: %w", err)
+	}
+	return &state, nil
 }
 
 // sanitizeFileName removes invalid characters from a string to be used as a file name.

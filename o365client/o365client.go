@@ -14,6 +14,7 @@ import (
 	"golang.org/x/time/rate"
 
 	"o365mbx/apperrors"
+	"o365mbx/filehandler"
 )
 
 const graphAPIBaseURL = "https://graph.microsoft.com/v1.0"
@@ -21,7 +22,7 @@ const graphAPIBaseURL = "https://graph.microsoft.com/v1.0"
 // O365ClientInterface defines the interface for O365Client methods used by other packages.
 type O365ClientInterface interface {
 	DoRequestWithRetry(req *http.Request) (*http.Response, error)
-	GetMessages(ctx context.Context, mailboxName, since string) ([]Message, error)
+	GetMessages(ctx context.Context, mailboxName string, state *filehandler.RunState) ([]Message, error)
 	GetAttachments(ctx context.Context, mailboxName, messageID string) ([]Attachment, error)
 	GetAttachmentDetails(ctx context.Context, mailboxName, messageID, attachmentID string) (*Attachment, error)
 }
@@ -95,7 +96,7 @@ func (c *O365Client) DoRequestWithRetry(req *http.Request) (*http.Response, erro
 }
 
 // GetMessages fetches a list of messages for a given mailbox.
-func (c *O365Client) GetMessages(ctx context.Context, mailboxName, since string) ([]Message, error) { // ctx added
+func (c *O365Client) GetMessages(ctx context.Context, mailboxName string, state *filehandler.RunState) ([]Message, error) { // ctx added
 	var allMessages []Message
 
 	baseURL, err := url.Parse(fmt.Sprintf("%s/users/%s/messages", graphAPIBaseURL, mailboxName))
@@ -104,9 +105,15 @@ func (c *O365Client) GetMessages(ctx context.Context, mailboxName, since string)
 	}
 
 	params := url.Values{}
-	params.Add("$orderby", "receivedDateTime asc")
-	if since != "" {
-		params.Add("$filter", fmt.Sprintf("receivedDateTime gt %s", since))
+	// Always sort by receivedDateTime and then by id for deterministic ordering.
+	params.Add("$orderby", "receivedDateTime asc, id asc")
+
+	// If a timestamp is available from a previous run, use it to filter.
+	if !state.LastRunTimestamp.IsZero() {
+		timestamp := state.LastRunTimestamp.Format(time.RFC3339Nano)
+		// Use 'ge' (greater than or equal) to include items with the same timestamp.
+		// The calling function will be responsible for skipping the one with the matching ID.
+		params.Add("$filter", fmt.Sprintf("receivedDateTime ge %s", timestamp))
 	}
 	baseURL.RawQuery = params.Encode()
 
