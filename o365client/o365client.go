@@ -105,7 +105,7 @@ func (c *O365Client) GetMessages(ctx context.Context, mailboxName, since string)
 
 	if since != "" {
 		params := url.Values{}
-		params.Add("$filter", fmt.Sprintf("receivedDateTime ge %s", since))
+		params.Add("$filter", fmt.Sprintf("receivedDateTime gt %s", since))
 		baseURL.RawQuery = params.Encode()
 	}
 

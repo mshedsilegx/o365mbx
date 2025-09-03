@@ -460,13 +460,8 @@ func runDownloadMode(ctx context.Context, cfg *Config, accessToken, mailboxName,
 
 	wg.Wait() // Wait for all message processing goroutines to complete
 
-	// If no messages were fetched, use current time as latest timestamp
-	if latestTimestamp.IsZero() {
-		latestTimestamp = time.Now()
-	}
-
-	// Save latest timestamp for next run only in incremental mode
-	if processingMode == "incremental" {
+	// Save latest timestamp for next run only in incremental mode and if new messages were processed
+	if processingMode == "incremental" && !latestTimestamp.IsZero() {
 		err = fileHandler.SaveLastRunTimestamp(latestTimestamp.Format(time.RFC3339), stateFilePath)
 		if err != nil {
 			if fsErr, ok := err.(*apperrors.FileSystemError); ok {
