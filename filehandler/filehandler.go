@@ -187,24 +187,22 @@ func (fh *FileHandler) SaveAttachmentFromBytes(attachmentName, messageID, conten
 }
 
 // SaveLastRunTimestamp saves the timestamp of the last successful run.
-func (fh *FileHandler) SaveLastRunTimestamp(timestamp string) error {
-	filePath := filepath.Join(fh.workspacePath, "last_run_timestamp.txt")
-	err := os.WriteFile(filePath, []byte(timestamp), 0644)
+func (fh *FileHandler) SaveLastRunTimestamp(timestamp, stateFilePath string) error {
+	err := os.WriteFile(stateFilePath, []byte(timestamp), 0644)
 	if err != nil {
-		return &apperrors.FileSystemError{Path: filePath, Msg: "failed to save last run timestamp", Err: err}
+		return &apperrors.FileSystemError{Path: stateFilePath, Msg: "failed to save last run timestamp", Err: err}
 	}
 	return nil
 }
 
 // LoadLastRunTimestamp loads the timestamp of the last successful run.
-func (fh *FileHandler) LoadLastRunTimestamp() (string, error) {
-	filePath := filepath.Join(fh.workspacePath, "last_run_timestamp.txt")
-	content, err := os.ReadFile(filePath)
+func (fh *FileHandler) LoadLastRunTimestamp(stateFilePath string) (string, error) {
+	content, err := os.ReadFile(stateFilePath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return "", nil // File does not exist, first run
 		}
-		return "", &apperrors.FileSystemError{Path: filePath, Msg: "failed to read last run timestamp file", Err: err}
+		return "", &apperrors.FileSystemError{Path: stateFilePath, Msg: "failed to read last run timestamp file", Err: err}
 	}
 	return strings.TrimSpace(string(content)), nil
 }

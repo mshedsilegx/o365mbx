@@ -68,6 +68,8 @@ func main() {
 	displayVersion := flag.Bool("version", false, "Display application version")
 	healthCheck := flag.Bool("healthcheck", false, "Perform a health check on the mailbox and exit") // New flag for healthcheck
 	debug := flag.Bool("debug", false, "Enable debug logging")
+	processingMode := flag.String("processing-mode", "full", "Processing mode: 'full' or 'incremental'")
+	stateFilePath := flag.String("state", "", "Path to the state file for incremental processing")
 	flag.Parse()
 
 	// Configure logging
@@ -129,6 +131,12 @@ func main() {
 	if !isValidEmail(*mailboxName) {
 		log.WithField("argument", "mailboxName").Fatalf("Error: Invalid mailbox name format: %s", *mailboxName)
 	}
+	if *processingMode != "full" && *processingMode != "incremental" {
+		log.WithField("argument", "processing-mode").Fatalf("Error: Invalid processing mode. Must be 'full' or 'incremental'.")
+	}
+	if *processingMode == "incremental" && *stateFilePath == "" {
+		log.WithField("argument", "state").Fatalf("Error: State file path must be provided for incremental processing mode.")
+	}
 
 	// Health Check Mode
 	if *healthCheck {
@@ -151,11 +159,11 @@ func main() {
 	}
 
 	// Normal Download Mode
-	runDownloadMode(ctx, cfg, *accessToken, *mailboxName, *workspacePath, rng)
+	runDownloadMode(ctx, cfg, *accessToken, *mailboxName, *workspacePath, *processingMode, *stateFilePath, rng)
 }
 
 // runDownloadMode handles the main logic for downloading emails and attachments.
-func runDownloadMode(ctx context.Context, cfg *Config, accessToken, mailboxName, workspacePath string, rng *rand.Rand) {
+func runDownloadMode(ctx context.Context, cfg *Config, accessToken, mailboxName, workspacePath, processingMode, stateFilePath string, rng *rand.Rand) {
 	// Argument validation specific to download mode
 	if err := validateWorkspacePath(workspacePath); err != nil {
 		if fsErr, ok := err.(*apperrors.FileSystemError); ok {
@@ -202,20 +210,24 @@ func runDownloadMode(ctx context.Context, cfg *Config, accessToken, mailboxName,
 	}
 	log.WithField("path", workspacePath).Infof("Workspace created.")
 
-	// Load last run timestamp
+	// Load last run timestamp only in incremental mode
 	var lastRunTimestamp string
-	lastRunTimestamp, err = fileHandler.LoadLastRunTimestamp()
-	if err != nil {
-		if fsErr, ok := err.(*apperrors.FileSystemError); ok {
-			log.Fatalf("Critical file system error: %s (Path: %s, Original: %v)", fsErr.Msg, fsErr.Path, fsErr.Unwrap())
-		} else {
-			log.Errorf("Error loading last run timestamp: %v", err)
+	if processingMode == "incremental" {
+		lastRunTimestamp, err = fileHandler.LoadLastRunTimestamp(stateFilePath)
+		if err != nil {
+			if fsErr, ok := err.(*apperrors.FileSystemError); ok {
+				log.Fatalf("Critical file system error reading state file: %s (Path: %s, Original: %v)", fsErr.Msg, fsErr.Path, fsErr.Unwrap())
+			} else {
+				log.Errorf("Error loading last run timestamp from state file: %v", err)
+			}
 		}
-	}
-	if lastRunTimestamp != "" {
-		log.WithField("lastRunTimestamp", lastRunTimestamp).Infof("Fetching emails since last run.")
+		if lastRunTimestamp != "" {
+			log.WithField("lastRunTimestamp", lastRunTimestamp).Infof("Fetching emails since last run.")
+		} else {
+			log.Info("No last run timestamp found in state file. Fetching all available emails.")
+		}
 	} else {
-		log.Info("No last run timestamp found. Fetching all available emails.")
+		log.Info("Running in full processing mode. Fetching all available emails.")
 	}
 
 	// 2. Fetch emails
@@ -453,17 +465,19 @@ func runDownloadMode(ctx context.Context, cfg *Config, accessToken, mailboxName,
 		latestTimestamp = time.Now()
 	}
 
-	// Save latest timestamp for next run
-	err = fileHandler.SaveLastRunTimestamp(latestTimestamp.Format(time.RFC3339))
-	if err != nil {
-		if fsErr, ok := err.(*apperrors.FileSystemError); ok {
-			log.WithFields(log.Fields{
-				"errorType": "FileSystemError",
-				"path":      fsErr.Path,
-				"error":     fsErr.Unwrap(),
-			}).Errorf("File system error saving last run timestamp: %s", fsErr.Msg)
-		} else {
-			log.WithField("error", err).Errorf("Error saving last run timestamp.")
+	// Save latest timestamp for next run only in incremental mode
+	if processingMode == "incremental" {
+		err = fileHandler.SaveLastRunTimestamp(latestTimestamp.Format(time.RFC3339), stateFilePath)
+		if err != nil {
+			if fsErr, ok := err.(*apperrors.FileSystemError); ok {
+				log.WithFields(log.Fields{
+					"errorType": "FileSystemError",
+					"path":      fsErr.Path,
+					"error":     fsErr.Unwrap(),
+				}).Errorf("File system error saving last run timestamp to state file: %s", fsErr.Msg)
+			} else {
+				log.WithField("error", err).Errorf("Error saving last run timestamp to state file.")
+			}
 		}
 	}
 
