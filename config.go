@@ -9,6 +9,10 @@ import (
 )
 
 type Config struct {
+	AccessToken                string  `json:"accessToken"`
+	MailboxName                string  `json:"mailboxName"`
+	WorkspacePath              string  `json:"workspacePath"`
+	ProcessedFolder            string  `json:"processedFolder"`
 	HTTPClientTimeoutSeconds   int     `json:"httpClientTimeoutSeconds"`
 	MaxRetries                 int     `json:"maxRetries"`
 	InitialBackoffSeconds      int     `json:"initialBackoffSeconds"`
@@ -21,6 +25,9 @@ type Config struct {
 
 // SetDefaults sets default values for the configuration parameters.
 func (c *Config) SetDefaults() {
+	if c.ProcessedFolder == "" {
+		c.ProcessedFolder = "processed"
+	}
 	if c.HTTPClientTimeoutSeconds == 0 {
 		c.HTTPClientTimeoutSeconds = 120
 	}

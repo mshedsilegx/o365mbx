@@ -57,16 +57,19 @@ func validateWorkspacePath(path string) error {
 func main() {
 	rng := rand.New(rand.NewSource(time.Now().UnixNano())) // Create a local random number generator
 
+	configPath := flag.String("config", "", "Path to the configuration file (JSON)")
+	displayVersion := flag.Bool("version", false, "Display application version")
+	healthCheck := flag.Bool("healthcheck", false, "Perform a health check on the mailbox and exit") // New flag for healthcheck
+
+	// Define flags for settings that can be in the config file or command line
 	accessToken := flag.String("token", "", "Access token for O356 API")
 	mailboxName := flag.String("mailbox", "", "Mailbox name (e.g., name@domain.com)")
 	workspacePath := flag.String("workspace", "", "Unique folder to store all artifacts")
-	timeoutSeconds := flag.Int("timeout", 120, "HTTP client timeout in seconds (default: 120)")
-	maxParallelDownloads := flag.Int("parallel", 10, "Maximum number of parallel downloads (default: 10)")
-	configPath := flag.String("config", "", "Path to the configuration file (JSON)")
+	processedFolder := flag.String("processed-folder", "", "Folder to move processed emails to")
+	timeoutSeconds := flag.Int("timeout", 0, "HTTP client timeout in seconds")
+	maxParallelDownloads := flag.Int("parallel", 0, "Maximum number of parallel downloads")
 	apiCallsPerSecond := flag.Float64("api-rate", 0, "API calls per second for client-side rate limiting (default: 5.0)")
 	apiBurst := flag.Int("api-burst", 0, "API burst capacity for client-side rate limiting (default: 10)")
-	displayVersion := flag.Bool("version", false, "Display application version")
-	healthCheck := flag.Bool("healthcheck", false, "Perform a health check on the mailbox and exit") // New flag for healthcheck
 	flag.Parse()
 
 	if *displayVersion {
@@ -80,16 +83,28 @@ func main() {
 	}
 
 	// Override config values with command-line arguments if provided
-	if *timeoutSeconds != 120 { // If user explicitly set timeoutSeconds
+	if *accessToken != "" {
+		cfg.AccessToken = *accessToken
+	}
+	if *mailboxName != "" {
+		cfg.MailboxName = *mailboxName
+	}
+	if *workspacePath != "" {
+		cfg.WorkspacePath = *workspacePath
+	}
+	if *processedFolder != "" {
+		cfg.ProcessedFolder = *processedFolder
+	}
+	if *timeoutSeconds != 0 {
 		cfg.HTTPClientTimeoutSeconds = *timeoutSeconds
 	}
-	if *maxParallelDownloads != 10 { // If user explicitly set maxParallelDownloads
+	if *maxParallelDownloads != 0 {
 		cfg.MaxParallelDownloads = *maxParallelDownloads
 	}
-	if *apiCallsPerSecond != 0 { // If user explicitly set apiCallsPerSecond
+	if *apiCallsPerSecond != 0 {
 		cfg.APICallsPerSecond = *apiCallsPerSecond
 	}
-	if *apiBurst != 0 { // If user explicitly set apiBurst
+	if *apiBurst != 0 {
 		cfg.APIBurst = *apiBurst
 	}
 
@@ -111,11 +126,11 @@ func main() {
 	}()
 
 	// Argument validation (common for both modes: healthcheck and download)
-	if *accessToken == "" {
+	if cfg.AccessToken == "" {
 		log.WithField("argument", "accessToken").Fatalf("Error: Access token is missing.")
 	}
-	if !isValidEmail(*mailboxName) {
-		log.WithField("argument", "mailboxName").Fatalf("Error: Invalid mailbox name format: %s", *mailboxName)
+	if !isValidEmail(cfg.MailboxName) {
+		log.WithField("argument", "mailboxName").Fatalf("Error: Invalid mailbox name format: %s", cfg.MailboxName)
 	}
 
 	// Health Check Mode
@@ -130,7 +145,7 @@ func main() {
 
 		// Initialize o365Client for health check
 		o365Client := o365client.NewO365Client(
-			*accessToken,
+			cfg.AccessToken,
 			time.Duration(cfg.HTTPClientTimeoutSeconds)*time.Second,
 			cfg.MaxRetries,
 			cfg.InitialBackoffSeconds,
@@ -139,18 +154,18 @@ func main() {
 			rng,
 		)
 
-		runHealthCheckMode(ctx, o365Client, *mailboxName)
+		runHealthCheckMode(ctx, o365Client, cfg.MailboxName)
 		os.Exit(0) // Exit after health check
 	}
 
 	// Normal Download Mode
-	runDownloadMode(ctx, cfg, *accessToken, *mailboxName, *workspacePath, rng)
+	runDownloadMode(ctx, cfg, rng)
 }
 
 // runDownloadMode handles the main logic for downloading emails and attachments.
-func runDownloadMode(ctx context.Context, cfg *Config, accessToken, mailboxName, workspacePath string, rng *rand.Rand) {
+func runDownloadMode(ctx context.Context, cfg *Config, rng *rand.Rand) {
 	// Argument validation specific to download mode
-	if err := validateWorkspacePath(workspacePath); err != nil {
+	if err := validateWorkspacePath(cfg.WorkspacePath); err != nil {
 		if fsErr, ok := err.(*apperrors.FileSystemError); ok {
 			log.WithFields(log.Fields{
 				"argument": "workspacePath",
@@ -173,7 +188,7 @@ func runDownloadMode(ctx context.Context, cfg *Config, accessToken, mailboxName,
 
 	// Initialize components
 	o365Client := o365client.NewO365Client(
-		accessToken,
+		cfg.AccessToken,
 		time.Duration(cfg.HTTPClientTimeoutSeconds)*time.Second,
 		cfg.MaxRetries,
 		cfg.InitialBackoffSeconds,
@@ -183,7 +198,7 @@ func runDownloadMode(ctx context.Context, cfg *Config, accessToken, mailboxName,
 	)
 	emailProcessor := emailprocessor.NewEmailProcessor()
 	fileHandler := filehandler.NewFileHandler(
-		workspacePath,
+		cfg.WorkspacePath,
 		o365Client,
 		cfg.LargeAttachmentThresholdMB,
 		cfg.ChunkSizeMB,
@@ -198,7 +213,7 @@ func runDownloadMode(ctx context.Context, cfg *Config, accessToken, mailboxName,
 			log.Errorf("Error creating workspace: %v", err)
 		}
 	}
-	log.WithField("path", workspacePath).Infof("Workspace created.")
+	log.WithField("path", cfg.WorkspacePath).Infof("Workspace created.")
 
 	// Load last run timestamp
 	var lastRunTimestamp string
@@ -218,7 +233,7 @@ func runDownloadMode(ctx context.Context, cfg *Config, accessToken, mailboxName,
 
 	// 2. Fetch emails
 	var messages []o365client.Message
-	messages, err = o365Client.GetMessages(ctx, mailboxName, lastRunTimestamp)
+	messages, err = o365Client.GetMessages(ctx, cfg.MailboxName, lastRunTimestamp)
 	if err != nil {
 		switch e := err.(type) {
 		case *apperrors.APIError:
@@ -251,6 +266,11 @@ func runDownloadMode(ctx context.Context, cfg *Config, accessToken, mailboxName,
 	var latestTimestamp time.Time
 	var mu sync.Mutex // Mutex to protect latestTimestamp
 
+	processedFolderID, err := o365Client.GetFolderID(ctx, cfg.MailboxName, cfg.ProcessedFolder)
+	if err != nil {
+		log.Fatalf("Failed to get processed folder ID: %v", err)
+	}
+
 	for _, msg := range messages {
 		wg.Add(1)
 		semaphore <- struct{}{}
@@ -267,26 +287,23 @@ func runDownloadMode(ctx context.Context, cfg *Config, accessToken, mailboxName,
 				log.WithFields(log.Fields{"messageID": msg.ID, "error": err}).Warn("Failed to clean HTML for message.")
 				cleanedBody = msg.Body.Content // Use original if cleaning fails
 			}
-			err = fileHandler.SaveEmailBody(msg.Subject, msg.ID, cleanedBody)
-			if err != nil {
-				if fsErr, ok := err.(*apperrors.FileSystemError); ok {
-					log.WithFields(log.Fields{
-						"messageID": msg.ID,
-						"path":      fsErr.Path,
-						"error":     fsErr.Unwrap(),
-					}).Errorf("File system error saving email body: %s", fsErr.Msg)
-				} else {
-					log.WithFields(log.Fields{
-						"messageID": msg.ID,
-						"error":     err,
-					}).Errorf("Error saving email body.")
-				}
+
+			emailData := filehandler.EmailData{
+				To:           make([]string, len(msg.ToRecipients)),
+				From:         msg.From.EmailAddress.Address,
+				Subject:      msg.Subject,
+				ReceivedDate: msg.ReceivedDateTime.Format(time.RFC3339),
+				Body:         cleanedBody,
+				Attachments:  []filehandler.AttachmentData{},
+			}
+			for i, recipient := range msg.ToRecipients {
+				emailData.To[i] = recipient.EmailAddress.Address
 			}
 
 			// Download and save attachments
 			if msg.HasAttachments {
 				var attachments []o365client.Attachment
-				attachments, err = o365Client.GetAttachments(ctx, mailboxName, msg.ID)
+				attachments, err = o365Client.GetAttachments(ctx, cfg.MailboxName, msg.ID)
 				if err != nil {
 					switch e := err.(type) {
 					case *apperrors.APIError:
@@ -330,7 +347,7 @@ func runDownloadMode(ctx context.Context, cfg *Config, accessToken, mailboxName,
 					go func(att o365client.Attachment) {
 						defer attWg.Done()
 						log.WithFields(log.Fields{"attachmentName": att.Name, "messageID": msg.ID}).Infof("Downloading attachment.")
-						err = fileHandler.SaveAttachment(ctx, att.Name, msg.ID, att.DownloadURL, accessToken, att.Size)
+						newFileName, err := fileHandler.SaveAttachment(ctx, att.Name, msg.ID, att.DownloadURL, cfg.AccessToken, att.Size)
 						if err != nil {
 							switch e := err.(type) {
 							case *apperrors.FileSystemError:
@@ -370,10 +387,42 @@ func runDownloadMode(ctx context.Context, cfg *Config, accessToken, mailboxName,
 									}).Errorf("Unknown error saving attachment.")
 								}
 							}
+						} else {
+							mu.Lock()
+							emailData.Attachments = append(emailData.Attachments, filehandler.AttachmentData{
+								Name:        att.Name,
+								Size:        att.Size,
+								DownloadURL: newFileName,
+							})
+							mu.Unlock()
 						}
 					}(att)
 				}
 				attWg.Wait() // Wait for all attachments of this message to complete
+			}
+
+			err = fileHandler.SaveEmailAsJSON(msg.ID, emailData)
+			if err != nil {
+				if fsErr, ok := err.(*apperrors.FileSystemError); ok {
+					log.WithFields(log.Fields{
+						"messageID": msg.ID,
+						"path":      fsErr.Path,
+						"error":     fsErr.Unwrap(),
+					}).Errorf("File system error saving email JSON: %s", fsErr.Msg)
+				} else {
+					log.WithFields(log.Fields{
+						"messageID": msg.ID,
+						"error":     err,
+					}).Errorf("Error saving email JSON.")
+				}
+				return // Do not move message if saving fails
+			}
+
+			// Move the message to the processed folder
+			err = o365Client.MoveMessage(ctx, cfg.MailboxName, msg.ID, processedFolderID)
+			if err != nil {
+				log.WithFields(log.Fields{"messageID": msg.ID, "error": err}).Errorf("Failed to move message.")
+				return // Do not update timestamp if move fails
 			}
 
 			// Update latestTimestamp safely
