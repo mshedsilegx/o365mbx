@@ -226,7 +226,7 @@ func runDownloadMode(ctx context.Context, cfg *Config, rng *rand.Rand) {
 
 	// Load last run timestamp
 	var lastRunTimestamp string
-	if cfg.ProcessingMode != "full" {
+	if cfg.ProcessingMode == "incremental" {
 		var err error
 		lastRunTimestamp, err = fileHandler.LoadLastRunTimestamp()
 		if err != nil {
@@ -242,7 +242,7 @@ func runDownloadMode(ctx context.Context, cfg *Config, rng *rand.Rand) {
 			log.Info("No last run timestamp found. Fetching all available emails.")
 		}
 	} else {
-		log.Info("Running in 'full' mode. Fetching all available emails.")
+		log.Infof("Running in '%s' mode. Fetching all available emails from Inbox.", cfg.ProcessingMode)
 	}
 
 	// 2. Fetch emails
@@ -408,7 +408,7 @@ func runDownloadMode(ctx context.Context, cfg *Config, rng *rand.Rand) {
 		latestTimestamp = time.Now()
 	}
 
-	if cfg.ProcessingMode != "full" {
+	if cfg.ProcessingMode == "incremental" {
 		// Save latest timestamp for next run
 		err := fileHandler.SaveLastRunTimestamp(latestTimestamp.Format(time.RFC3339))
 		if err != nil {
