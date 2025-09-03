@@ -9,7 +9,11 @@ import (
 )
 
 type Config struct {
-	AccessToken                string  `json:"accessToken"`
+	AccessToken                string  `json:""`
+	TokenString                string  `json:"tokenString"`
+	TokenFile                  string  `json:"tokenFile"`
+	TokenEnv                   bool    `json:"tokenEnv"`
+	RemoveTokenFile            bool    `json:"removeTokenFile"`
 	MailboxName                string  `json:"mailboxName"`
 	WorkspacePath              string  `json:"workspacePath"`
 	ProcessedFolder            string  `json:"processedFolder"`

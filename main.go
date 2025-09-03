@@ -63,9 +63,12 @@ func main() {
 	healthCheck := flag.Bool("healthcheck", false, "Perform a health check on the mailbox and exit") // New flag for healthcheck
 
 	// Define flags for settings that can be in the config file or command line
-	accessToken := flag.String("token", "", "Access token for O356 API")
 	mailboxName := flag.String("mailbox", "", "Mailbox name (e.g., name@domain.com)")
 	workspacePath := flag.String("workspace", "", "Unique folder to store all artifacts")
+	tokenString := flag.String("token-string", "", "Directly provides the JWT token as a string.")
+	tokenFile := flag.String("token-file", "", "Specifies a file from which to read the JWT token.")
+	tokenEnv := flag.Bool("token-env", false, "Instructs the application to read the JWT token from the JWT_TOKEN environment variable.")
+	removeTokenFile := flag.Bool("remove-token-file", false, "Remove the token file after all messages have been processed for security purposes.")
 	processedFolder := flag.String("processed-folder", "", "Folder to move processed emails to")
 	errorFolder := flag.String("error-folder", "", "Folder to move emails that failed to process")
 	processingMode := flag.String("processing-mode", "", "Processing mode: full, incremental, or route")
@@ -90,8 +93,17 @@ func main() {
 	}
 
 	// Override config values with command-line arguments if provided
-	if *accessToken != "" {
-		cfg.AccessToken = *accessToken
+	if *tokenString != "" {
+		cfg.TokenString = *tokenString
+	}
+	if *tokenFile != "" {
+		cfg.TokenFile = *tokenFile
+	}
+	if *tokenEnv {
+		cfg.TokenEnv = *tokenEnv
+	}
+	if *removeTokenFile {
+		cfg.RemoveTokenFile = *removeTokenFile
 	}
 	if *mailboxName != "" {
 		cfg.MailboxName = *mailboxName
@@ -136,6 +148,49 @@ func main() {
 	// Validate loaded configuration
 	if err := cfg.Validate(); err != nil {
 		log.Fatalf("Invalid configuration: %v", err)
+	}
+
+	if cfg.RemoveTokenFile && cfg.TokenFile != "" {
+		defer func() {
+			log.Infof("Removing token file: %s", cfg.TokenFile)
+			if err := os.Remove(cfg.TokenFile); err != nil {
+				log.Errorf("Failed to remove token file: %v", err)
+			}
+		}()
+	}
+
+	// --- Token Acquisition and Validation ---
+	tokenSourceCount := 0
+	if cfg.TokenString != "" {
+		tokenSourceCount++
+	}
+	if cfg.TokenFile != "" {
+		tokenSourceCount++
+	}
+	if cfg.TokenEnv {
+		tokenSourceCount++
+	}
+
+	if tokenSourceCount == 0 {
+		log.Fatalf("No token source specified. Please use one of -token-string, -token-file, or -token-env.")
+	}
+	if tokenSourceCount > 1 {
+		log.Fatalf("Multiple token sources specified. Please use only one of -token-string, -token-file, or -token-env.")
+	}
+
+	if cfg.TokenString != "" {
+		cfg.AccessToken = cfg.TokenString
+	} else if cfg.TokenFile != "" {
+		tokenBytes, err := os.ReadFile(cfg.TokenFile)
+		if err != nil {
+			log.Fatalf("Failed to read token from file %s: %v", cfg.TokenFile, err)
+		}
+		cfg.AccessToken = strings.TrimSpace(string(tokenBytes))
+	} else if cfg.TokenEnv {
+		cfg.AccessToken = os.Getenv("JWT_TOKEN")
+		if cfg.AccessToken == "" {
+			log.Fatalf("Token source set to env, but JWT_TOKEN environment variable is not set or empty.")
+		}
 	}
 
 	// Set up context for graceful shutdown

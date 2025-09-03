@@ -25,7 +25,10 @@ The application can be configured using the following command-line arguments:
 
 | Argument                       | Description                                                                    | Required | Default     |
 |--------------------------------|--------------------------------------------------------------------------------|----------|-------------|
-| `-token`                       | Access token for the Microsoft Graph API.                                      | **Yes**  |             |
+| `-token-string`                | Provides the JWT token directly as a string. (Mutually exclusive)              | **Yes**  |             |
+| `-token-file`                  | Path to a file containing the JWT token. (Mutually exclusive)                  | **Yes**  |             |
+| `-token-env`                   | Reads the JWT token from the `JWT_TOKEN` environment variable. (Mutually exclusive) | **Yes**  | `false`     |
+| `-remove-token-file`           | If using `-token-file`, remove the file after use.                             | No       | `false`     |
 | `-mailbox`                     | The email address of the mailbox to download (e.g., `user@example.com`).       | **Yes**  |             |
 | `-workspace`                   | The absolute path to a unique folder for storing downloaded artifacts.         | **Yes**  |             |
 | `-config`                      | Path to a JSON configuration file.                                             | No       |             |
@@ -49,11 +52,12 @@ For more advanced configuration, you can use a JSON file (e.g., `config.json`) a
 
 ### Example `config.json`
 
-A configuration file can specify any of the command-line arguments.
+A configuration file can specify any of the command-line arguments. Note that only one token source (`tokenString`, `tokenFile`, or `tokenEnv`) should be specified.
 
 ```json
 {
-  "accessToken": "YOUR_ACCESS_TOKEN",
+  "tokenFile": "/path/to/secure/token.txt",
+  "removeTokenFile": true,
   "mailboxName": "user@example.com",
   "workspacePath": "/path/to/your/output",
   "processingMode": "route",
@@ -72,7 +76,10 @@ A configuration file can specify any of the command-line arguments.
 
 ### Configuration Directives
 
-*   `accessToken`: (String) **Required**. Access token for the Microsoft Graph API.
+*   `tokenString`: (String) The JWT token as a string.
+*   `tokenFile`: (String) Path to a file containing the JWT token.
+*   `tokenEnv`: (Boolean) If `true`, reads the token from the `JWT_TOKEN` environment variable.
+*   `removeTokenFile`: (Boolean) If `true` and `tokenFile` is used, the token file will be deleted after use. Default: `false`.
 *   `mailboxName`: (String) **Required**. The email address of the mailbox to download.
 *   `workspacePath`: (String) **Required**. The absolute path to a unique folder for storing downloaded artifacts.
 *   `processingMode`: (String) The processing mode. One of `full`, `incremental`, or `route`. Default: `route`.
@@ -91,18 +98,19 @@ A configuration file can specify any of the command-line arguments.
 
 ### 1. Running with Minimal Required Arguments
 
-This example runs the application with only the essential arguments. All other settings will use their default values. For example, this will run in `route` mode and move emails to the `processed` and `error` folders in the target mailbox.
+This example runs the application with only the essential arguments, providing the token as a string. All other settings will use their default values (e.g., `processing-mode route`).
 
 ```shell
-./o365mbx -token "YOUR_ACCESS_TOKEN" -mailbox "user@example.com" -workspace "/path/to/your/output"
+./o365mbx -token-string "YOUR_ACCESS_TOKEN" -mailbox "user@example.com" -workspace "/path/to/your/output"
 ```
 
 ### 2. Running with All Command-Line Arguments
 
-This example demonstrates using all available command-line flags to customize behavior:
+This example demonstrates using all available command-line flags to customize behavior, reading the token from a file and removing it after use.
 
 ```shell
-./o365mbx -token "YOUR_ACCESS_TOKEN" \
+./o365mbx -token-file "/path/to/token.txt" \
+          -remove-token-file \
           -mailbox "user@example.com" \
           -workspace "/path/to/your/output" \
           -timeout 300 \
@@ -186,10 +194,10 @@ This mode is useful for creating a complete, one-time backup of the entire Inbox
 
 The health check mode allows you to quickly verify that the application can connect to the specified mailbox and that the access token is valid. It retrieves and displays the total message count in the inbox.
 
-To run a health check, use the `-healthcheck` flag:
+To run a health check, use the `-healthcheck` flag. You must still provide a token source.
 
 ```shell
-./o365mbx -token "YOUR_ACCESS_TOKEN" -mailbox "user@example.com" -healthcheck
+./o365mbx -token-env -mailbox "user@example.com" -healthcheck
 ```
 
 ## License
