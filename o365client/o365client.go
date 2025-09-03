@@ -7,6 +7,7 @@ import (
 	"io"
 	"math/rand"
 	"net/http"
+	"strings"
 	"time"
 
 	log "github.com/sirupsen/logrus"
@@ -22,6 +23,8 @@ type O365ClientInterface interface {
 	DoRequestWithRetry(req *http.Request) (*http.Response, error)
 	GetMessages(ctx context.Context, mailboxName, since string) ([]Message, error)
 	GetAttachments(ctx context.Context, mailboxName, messageID string) ([]Attachment, error)
+	GetFolderID(ctx context.Context, mailboxName, folderName string) (string, error)
+	MoveMessage(ctx context.Context, mailboxName, messageID, folderID string) error
 }
 
 type O365Client struct {
@@ -95,7 +98,7 @@ func (c *O365Client) DoRequestWithRetry(req *http.Request) (*http.Response, erro
 // GetMessages fetches a list of messages for a given mailbox.
 func (c *O365Client) GetMessages(ctx context.Context, mailboxName, since string) ([]Message, error) { // ctx added
 	var allMessages []Message
-	url := fmt.Sprintf("%s/users/%s/messages", graphAPIBaseURL, mailboxName)
+	url := fmt.Sprintf("%s/users/%s/mailFolders/inbox/messages", graphAPIBaseURL, mailboxName)
 
 	if since != "" {
 		url = fmt.Sprintf("%s?$filter=receivedDateTime ge %s", url, since)
@@ -245,6 +248,72 @@ func (c *O365Client) GetMailboxStatistics(ctx context.Context, mailboxName strin
 	return response.OdataCount, nil
 }
 
+// GetFolderID retrieves the ID of a mail folder by its name.
+func (c *O365Client) GetFolderID(ctx context.Context, mailboxName, folderName string) (string, error) {
+	url := fmt.Sprintf("%s/users/%s/mailFolders?$filter=displayName eq '%s'", graphAPIBaseURL, mailboxName, folderName)
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return "", fmt.Errorf("failed to create HTTP request for folder ID: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+c.accessToken)
+
+	resp, err := c.DoRequestWithRetry(req)
+	if err != nil {
+		return "", fmt.Errorf("failed to get folder ID: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		errorBody, _ := io.ReadAll(resp.Body)
+		return "", &apperrors.APIError{StatusCode: resp.StatusCode, Msg: string(errorBody)}
+	}
+
+	var response struct {
+		Value []struct {
+			ID string `json:"id"`
+		} `json:"value"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
+		return "", fmt.Errorf("failed to decode folder ID response: %w", err)
+	}
+
+	if len(response.Value) == 0 {
+		return "", fmt.Errorf("folder not found: %s", folderName)
+	}
+
+	return response.Value[0].ID, nil
+}
+
+// MoveMessage moves a message to a specified folder.
+func (c *O365Client) MoveMessage(ctx context.Context, mailboxName, messageID, folderID string) error {
+	url := fmt.Sprintf("%s/users/%s/messages/%s/move", graphAPIBaseURL, mailboxName, messageID)
+	body := map[string]string{"destinationId": folderID}
+	jsonBody, err := json.Marshal(body)
+	if err != nil {
+		return fmt.Errorf("failed to marshal move message request body: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", url, strings.NewReader(string(jsonBody)))
+	if err != nil {
+		return fmt.Errorf("failed to create HTTP request for move message: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+c.accessToken)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.DoRequestWithRetry(req)
+	if err != nil {
+		return fmt.Errorf("failed to move message: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		errorBody, _ := io.ReadAll(resp.Body)
+		return &apperrors.APIError{StatusCode: resp.StatusCode, Msg: string(errorBody)}
+	}
+
+	return nil
+}
+
 // Message represents an email message from O365
 type Message struct {
 	ID               string    `json:"id"`
@@ -255,6 +324,18 @@ type Message struct {
 		Content     string `json:"content"`
 	} `json:"body"`
 	HasAttachments bool `json:"hasAttachments"`
+	From           struct {
+		EmailAddress struct {
+			Address string `json:"address"`
+			Name    string `json:"name"`
+		} `json:"emailAddress"`
+	} `json:"from"`
+	ToRecipients []struct {
+		EmailAddress struct {
+			Address string `json:"address"`
+			Name    string `json:"name"`
+		} `json:"emailAddress"`
+	} `json:"toRecipients"`
 }
 
 // Attachment represents an attachment from O365

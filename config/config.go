@@ -1,4 +1,4 @@
-package main
+package config
 
 import (
 	"encoding/json"
@@ -9,6 +9,16 @@ import (
 )
 
 type Config struct {
+	AccessToken                string  `json:""`
+	TokenString                string  `json:"tokenString"`
+	TokenFile                  string  `json:"tokenFile"`
+	TokenEnv                   bool    `json:"tokenEnv"`
+	RemoveTokenFile            bool    `json:"removeTokenFile"`
+	MailboxName                string  `json:"mailboxName"`
+	WorkspacePath              string  `json:"workspacePath"`
+	ProcessedFolder            string  `json:"processedFolder"`
+	ErrorFolder                string  `json:"errorFolder"`
+	ProcessingMode             string  `json:"processingMode"`
 	HTTPClientTimeoutSeconds   int     `json:"httpClientTimeoutSeconds"`
 	MaxRetries                 int     `json:"maxRetries"`
 	InitialBackoffSeconds      int     `json:"initialBackoffSeconds"`
@@ -17,10 +27,27 @@ type Config struct {
 	MaxParallelDownloads       int     `json:"maxParallelDownloads"`
 	APICallsPerSecond          float64 `json:"apiCallsPerSecond"`
 	APIBurst                   int     `json:"apiBurst"`
+	DirPerms                   int     `json:"dirPerms"`
+	FilePerms                  int     `json:"filePerms"`
 }
 
 // SetDefaults sets default values for the configuration parameters.
 func (c *Config) SetDefaults() {
+	if c.DirPerms == 0 {
+		c.DirPerms = 0755
+	}
+	if c.FilePerms == 0 {
+		c.FilePerms = 0644
+	}
+	if c.ProcessedFolder == "" {
+		c.ProcessedFolder = "processed"
+	}
+	if c.ErrorFolder == "" {
+		c.ErrorFolder = "error"
+	}
+	if c.ProcessingMode == "" {
+		c.ProcessingMode = "route"
+	}
 	if c.HTTPClientTimeoutSeconds == 0 {
 		c.HTTPClientTimeoutSeconds = 120
 	}
@@ -76,6 +103,10 @@ func (c *Config) Validate() error {
 	// Add more complex validation if needed, e.g., chunkSizeMB < LargeAttachmentThresholdMB
 	if c.ChunkSizeMB > c.LargeAttachmentThresholdMB {
 		return fmt.Errorf("chunkSizeMB (%d) cannot be greater than largeAttachmentThresholdMB (%d)", c.ChunkSizeMB, c.LargeAttachmentThresholdMB)
+	}
+	allowedModes := map[string]bool{"full": true, "incremental": true, "route": true}
+	if !allowedModes[c.ProcessingMode] {
+		return fmt.Errorf("invalid processingMode: %s. must be one of 'full', 'incremental', or 'route'", c.ProcessingMode)
 	}
 	return nil
 }
