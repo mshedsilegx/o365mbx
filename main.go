@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"flag"
 	"fmt"
 	"math/rand"
@@ -16,7 +15,6 @@ import (
 
 	log "github.com/sirupsen/logrus"
 
-	"o365mbx/apperrors"
 	"o365mbx/emailprocessor"
 	"o365mbx/filehandler"
 	"o365mbx/o365client"
