@@ -14,7 +14,6 @@ import (
 	"golang.org/x/time/rate"
 
 	"o365mbx/apperrors"
-	"o365mbx/filehandler"
 )
 
 const graphAPIBaseURL = "https://graph.microsoft.com/v1.0"
@@ -315,12 +314,18 @@ type Message struct {
 
 // Attachment represents an attachment from O365
 type Attachment struct {
-	ID          string `json:"id"`
-	ODataType   string `json:"@odata.type"`
-	Name        string `json:"name"`
-	Size        int    `json:"size"`
-	ContentType string `json:"contentType"`
-	IsInline    bool   `json:"isInline"`
-	DownloadURL string `json:"@microsoft.graph.downloadUrl"`
+	ID           string `json:"id"`
+	ODataType    string `json:"@odata.type"`
+	Name         string `json:"name"`
+	Size         int    `json:"size"`
+	ContentType  string `json:"contentType"`
+	IsInline     bool   `json:"isInline"`
+	DownloadURL  string `json:"@microsoft.graph.downloadUrl"`
 	ContentBytes string `json:"contentBytes"`
+}
+
+// RunState represents the state of the last successful incremental run.
+type RunState struct {
+	LastRunTimestamp time.Time `json:"lastRunTimestamp"`
+	LastMessageID    string    `json:"lastMessageId"`
 }

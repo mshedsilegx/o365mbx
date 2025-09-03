@@ -20,12 +20,6 @@ import (
 	"o365mbx/o365client"
 )
 
-// RunState represents the state of the last successful incremental run.
-type RunState struct {
-	LastRunTimestamp time.Time `json:"lastRunTimestamp"`
-	LastMessageID    string    `json:"lastMessageId"`
-}
-
 type FileHandler struct {
 	workspacePath            string
 	o365Client               o365client.O365ClientInterface
@@ -195,7 +189,7 @@ func (fh *FileHandler) SaveAttachmentFromBytes(attachmentName, messageID, conten
 }
 
 // SaveState saves the RunState to the given file path as JSON.
-func (fh *FileHandler) SaveState(state *RunState, stateFilePath string) error {
+func (fh *FileHandler) SaveState(state *o365client.RunState, stateFilePath string) error {
 	data, err := json.Marshal(state)
 	if err != nil {
 		return fmt.Errorf("failed to marshal state to JSON: %w", err)
@@ -208,16 +202,16 @@ func (fh *FileHandler) SaveState(state *RunState, stateFilePath string) error {
 }
 
 // LoadState loads the RunState from the given file path.
-func (fh *FileHandler) LoadState(stateFilePath string) (*RunState, error) {
+func (fh *FileHandler) LoadState(stateFilePath string) (*o365client.RunState, error) {
 	content, err := os.ReadFile(stateFilePath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return &RunState{}, nil // File does not exist, return empty state
+			return &o365client.RunState{}, nil // File does not exist, return empty state
 		}
 		return nil, &apperrors.FileSystemError{Path: stateFilePath, Msg: "failed to read state file", Err: err}
 	}
 
-	var state RunState
+	var state o365client.RunState
 	err = json.Unmarshal(content, &state)
 	if err != nil {
 		return nil, fmt.Errorf("failed to unmarshal state from JSON: %w", err)

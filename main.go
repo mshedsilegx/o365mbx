@@ -155,7 +155,7 @@ func runDownloadMode(ctx context.Context, cfg *Config, accessToken, mailboxName,
 	}
 	log.WithField("path", workspacePath).Infof("Workspace created.")
 
-	var state *filehandler.RunState
+	var state *o365client.RunState
 	var err error
 	if processingMode == "incremental" {
 		state, err = fileHandler.LoadState(stateFilePath)
@@ -172,7 +172,7 @@ func runDownloadMode(ctx context.Context, cfg *Config, accessToken, mailboxName,
 		}
 	} else {
 		log.Info("Running in full processing mode. Fetching all available emails.")
-		state = &filehandler.RunState{}
+		state = &o365client.RunState{}
 	}
 
 	messages, err := o365Client.GetMessages(ctx, mailboxName, state)
@@ -271,7 +271,7 @@ func runDownloadMode(ctx context.Context, cfg *Config, accessToken, mailboxName,
 	wg.Wait()
 
 	if processingMode == "incremental" && newLatestMessage.ID != "" {
-		newState := &filehandler.RunState{
+		newState := &o365client.RunState{
 			LastRunTimestamp: newLatestMessage.ReceivedDateTime,
 			LastMessageID:    newLatestMessage.ID,
 		}
