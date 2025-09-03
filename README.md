@@ -94,6 +94,50 @@ A configuration file can specify any of the command-line arguments. Note that on
 *   `apiCallsPerSecond`: (Float) The number of API calls allowed per second. Default: `5.0`.
 *   `apiBurst`: (Integer) The burst capacity for the API rate limiter. Default: `10`.
 
+## JSON Output
+
+For each email processed, the application creates a JSON file in the workspace directory. The filename is the message ID of the email (e.g., `AAMkAG...=.json`). This file contains detailed information about the processed email.
+
+### Example JSON Output
+
+```json
+{
+  "to": [
+    "recipient1@example.com"
+  ],
+  "from": "sender@example.com",
+  "subject": "Project Update & Attachments",
+  "receivedDate": "2023-10-27T10:30:00Z",
+  "body": "Hello Team,\n\nPlease find the project update attached.\n\nBest regards",
+  "attachments": [
+    {
+      "name": "Project-Plan.docx",
+      "size": 12345,
+      "downloadUrl": "Project-Plan.docx_AAMkAG...=_Project-Plan.docx"
+    }
+  ],
+  "status": {
+    "state": "success",
+    "details": "Message processed successfully."
+  }
+}
+```
+
+### JSON Field Descriptions
+
+*   `to`: (Array of Strings) A list of recipient email addresses.
+*   `from`: (String) The sender's email address.
+*   `subject`: (String) The subject line of the email.
+*   `receivedDate`: (String) The date and time the email was received, in RFC3339 format.
+*   `body`: (String) The cleaned, plain-text version of the email body.
+*   `attachments`: (Array of Objects) A list of objects, where each object represents an attachment.
+    *   `name`: (String) The original filename of the attachment.
+    *   `size`: (Integer) The size of the attachment in bytes.
+    *   `downloadUrl`: (String) The local filename of the downloaded attachment within the workspace. **Note:** This is not a web URL.
+*   `status`: (Object) Contains the final processing status of the email.
+    *   `state`: (String) The final state, either `success` or `error`.
+    *   `details`: (String) A summary of the processing outcome. In case of an error, this will contain details about what went wrong.
+
 ## Examples
 
 ### 1. Running with Minimal Required Arguments
