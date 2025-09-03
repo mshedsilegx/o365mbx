@@ -103,11 +103,12 @@ func (c *O365Client) GetMessages(ctx context.Context, mailboxName, since string)
 		return nil, fmt.Errorf("failed to parse base URL: %w", err)
 	}
 
+	params := url.Values{}
+	params.Add("$orderby", "receivedDateTime asc")
 	if since != "" {
-		params := url.Values{}
 		params.Add("$filter", fmt.Sprintf("receivedDateTime gt %s", since))
-		baseURL.RawQuery = params.Encode()
 	}
+	baseURL.RawQuery = params.Encode()
 
 	nextLink := baseURL.String()
 
