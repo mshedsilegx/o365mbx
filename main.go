@@ -331,20 +331,46 @@ func runDownloadMode(ctx context.Context, cfg *Config, accessToken, mailboxName,
 					attWg.Add(1)
 					go func(att o365client.Attachment) {
 						defer attWg.Done()
+
+						// Get full attachment details to get the download URL
+						detailedAtt, err := o365Client.GetAttachmentDetails(ctx, mailboxName, msg.ID, att.ID)
+						if err != nil {
+							log.WithFields(log.Fields{
+								"attachmentName": att.Name,
+								"messageID":      msg.ID,
+								"attachmentID":   att.ID,
+								"error":          err,
+							}).Error("Failed to get attachment details, skipping download.")
+							return
+						}
+
+						// Log details for debugging
 						log.WithFields(log.Fields{
-							"attachmentName": att.Name,
+							"attachmentName": detailedAtt.Name,
 							"messageID":      msg.ID,
-							"attachmentID":   att.ID,
-							"attachmentSize": att.Size,
-							"attachmentType": att.ODataType,
-							"hasDownloadURL": att.DownloadURL != "",
-						}).Debug("Attempting to download attachment.")
-						err = fileHandler.SaveAttachment(ctx, att.Name, msg.ID, att.DownloadURL, accessToken, att.Size)
+							"attachmentID":   detailedAtt.ID,
+							"attachmentSize": detailedAtt.Size,
+							"attachmentType": detailedAtt.ODataType,
+							"hasDownloadURL": detailedAtt.DownloadURL != "",
+						}).Debug("Processing attachment for download.")
+
+						// Only proceed if it's a file attachment with a download URL
+						if detailedAtt.ODataType != "#microsoft.graph.fileAttachment" || detailedAtt.DownloadURL == "" {
+							log.WithFields(log.Fields{
+								"attachmentName": detailedAtt.Name,
+								"messageID":      msg.ID,
+								"attachmentID":   detailedAtt.ID,
+								"attachmentType": detailedAtt.ODataType,
+							}).Warn("Skipping attachment as it is not a downloadable file.")
+							return
+						}
+
+						err = fileHandler.SaveAttachment(ctx, detailedAtt.Name, msg.ID, detailedAtt.DownloadURL, accessToken, detailedAtt.Size)
 						if err != nil {
 							switch e := err.(type) {
 							case *apperrors.FileSystemError:
 								log.WithFields(log.Fields{
-									"attachmentName": att.Name,
+									"attachmentName": detailedAtt.Name,
 									"messageID":      msg.ID,
 									"errorType":      "FileSystemError",
 									"path":           e.Path,
@@ -352,7 +378,7 @@ func runDownloadMode(ctx context.Context, cfg *Config, accessToken, mailboxName,
 								}).Errorf("File system error saving attachment: %s", e.Msg)
 							case *apperrors.APIError:
 								log.WithFields(log.Fields{
-									"attachmentName": att.Name,
+									"attachmentName": detailedAtt.Name,
 									"messageID":      msg.ID,
 									"errorType":      "APIError",
 									"statusCode":     e.StatusCode,
@@ -360,19 +386,19 @@ func runDownloadMode(ctx context.Context, cfg *Config, accessToken, mailboxName,
 							default:
 								if errors.Is(err, context.Canceled) {
 									log.WithFields(log.Fields{
-										"attachmentName": att.Name,
+										"attachmentName": detailedAtt.Name,
 										"messageID":      msg.ID,
 										"errorType":      "ContextCanceled",
 									}).Errorf("Attachment download cancelled by user.")
 								} else if errors.Is(err, context.DeadlineExceeded) {
 									log.WithFields(log.Fields{
-										"attachmentName": att.Name,
+										"attachmentName": detailedAtt.Name,
 										"messageID":      msg.ID,
 										"errorType":      "ContextDeadlineExceeded",
 									}).Errorf("Attachment download timed out.")
 								} else {
 									log.WithFields(log.Fields{
-										"attachmentName": att.Name,
+										"attachmentName": detailedAtt.Name,
 										"messageID":      msg.ID,
 										"errorType":      "UnknownError",
 										"error":          err,

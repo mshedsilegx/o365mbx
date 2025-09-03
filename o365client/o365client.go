@@ -22,6 +22,7 @@ type O365ClientInterface interface {
 	DoRequestWithRetry(req *http.Request) (*http.Response, error)
 	GetMessages(ctx context.Context, mailboxName, since string) ([]Message, error)
 	GetAttachments(ctx context.Context, mailboxName, messageID string) ([]Attachment, error)
+	GetAttachmentDetails(ctx context.Context, mailboxName, messageID, attachmentID string) (*Attachment, error)
 }
 
 type O365Client struct {
@@ -200,6 +201,45 @@ func (c *O365Client) GetAttachments(ctx context.Context, mailboxName, messageID 
 	}
 
 	return response.Value, nil
+}
+
+// GetAttachmentDetails fetches the full details for a single attachment.
+func (c *O365Client) GetAttachmentDetails(ctx context.Context, mailboxName, messageID, attachmentID string) (*Attachment, error) {
+	url := fmt.Sprintf("%s/users/%s/messages/%s/attachments/%s", graphAPIBaseURL, mailboxName, messageID, attachmentID)
+
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create HTTP request for attachment details: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+c.accessToken)
+
+	resp, err := c.DoRequestWithRetry(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch attachment details: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		errorBody, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode == http.StatusUnauthorized {
+			return nil, &apperrors.AuthError{Msg: "invalid or expired access token"}
+		}
+		return nil, &apperrors.APIError{StatusCode: resp.StatusCode, Msg: string(errorBody)}
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response body for attachment details: %w", err)
+	}
+
+	var attachment Attachment
+	err = json.Unmarshal(body, &attachment)
+	if err != nil {
+		return nil, fmt.Errorf("failed to unmarshal attachment details response: %w", err)
+	}
+
+	return &attachment, nil
 }
 
 // GetMailboxStatistics fetches the total message count for a given mailbox's Inbox.
