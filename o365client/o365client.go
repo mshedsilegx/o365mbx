@@ -99,7 +99,7 @@ func (c *O365Client) GetMessages(ctx context.Context, mailboxName, since string)
 	url := fmt.Sprintf("%s/users/%s/messages", graphAPIBaseURL, mailboxName)
 
 	if since != "" {
-		url = fmt.Sprintf("%s?$filter=receivedDateTime ge %s", url, since)
+		url = fmt.Sprintf("%s?$filter=receivedDateTime ge '%s'", url, since)
 	}
 	nextLink := url
 
