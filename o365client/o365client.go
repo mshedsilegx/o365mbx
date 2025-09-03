@@ -260,6 +260,7 @@ type Message struct {
 // Attachment represents an attachment from O365
 type Attachment struct {
 	ID          string `json:"id"`
+	ODataType   string `json:"@odata.type"`
 	Name        string `json:"name"`
 	Size        int    `json:"size"`
 	ContentType string `json:"contentType"`

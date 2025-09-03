@@ -67,7 +67,19 @@ func main() {
 	apiBurst := flag.Int("api-burst", 0, "API burst capacity for client-side rate limiting (default: 10)")
 	displayVersion := flag.Bool("version", false, "Display application version")
 	healthCheck := flag.Bool("healthcheck", false, "Perform a health check on the mailbox and exit") // New flag for healthcheck
+	debug := flag.Bool("debug", false, "Enable debug logging")
 	flag.Parse()
+
+	// Configure logging
+	log.SetFormatter(&log.TextFormatter{
+		FullTimestamp: true,
+	})
+	if *debug {
+		log.SetLevel(log.DebugLevel)
+		log.Debugln("Debug logging enabled.")
+	} else {
+		log.SetLevel(log.InfoLevel)
+	}
 
 	if *displayVersion {
 		fmt.Printf("O365 Mailbox Downloader Version: %s\n", version)
@@ -120,11 +132,6 @@ func main() {
 
 	// Health Check Mode
 	if *healthCheck {
-		log.SetFormatter(&log.TextFormatter{
-			FullTimestamp: true,
-		})
-		log.SetLevel(log.InfoLevel)
-
 		fmt.Println("O365 Mailbox Downloader - Health Check Mode")
 		log.Infof("Version: %s", version)
 
@@ -161,11 +168,6 @@ func runDownloadMode(ctx context.Context, cfg *Config, accessToken, mailboxName,
 			log.WithField("argument", "workspacePath").Fatalf("Error validating workspace path: %v", err)
 		}
 	}
-
-	log.SetFormatter(&log.TextFormatter{
-		FullTimestamp: true,
-	})
-	log.SetLevel(log.InfoLevel)
 
 	fmt.Println("O365 Mailbox Downloader")
 	log.Infof("Version: %s", version) // Display the version
@@ -329,7 +331,14 @@ func runDownloadMode(ctx context.Context, cfg *Config, accessToken, mailboxName,
 					attWg.Add(1)
 					go func(att o365client.Attachment) {
 						defer attWg.Done()
-						log.WithFields(log.Fields{"attachmentName": att.Name, "messageID": msg.ID}).Infof("Downloading attachment.")
+						log.WithFields(log.Fields{
+							"attachmentName": att.Name,
+							"messageID":      msg.ID,
+							"attachmentID":   att.ID,
+							"attachmentSize": att.Size,
+							"attachmentType": att.ODataType,
+							"hasDownloadURL": att.DownloadURL != "",
+						}).Debug("Attempting to download attachment.")
 						err = fileHandler.SaveAttachment(ctx, att.Name, msg.ID, att.DownloadURL, accessToken, att.Size)
 						if err != nil {
 							switch e := err.(type) {
