@@ -25,9 +25,9 @@ The application can be configured using the following command-line arguments:
 
 | Argument                       | Description                                                                    | Required | Default     |
 |--------------------------------|--------------------------------------------------------------------------------|----------|-------------|
-| `-token-string`                | Provides the JWT token directly as a string. (Mutually exclusive)              | **Yes**  |             |
-| `-token-file`                  | Path to a file containing the JWT token. (Mutually exclusive)                  | **Yes**  |             |
-| `-token-env`                   | Reads the JWT token from the `JWT_TOKEN` environment variable. (Mutually exclusive) | **Yes**  | `false`     |
+| `-token-string`                | Provides the JWT token directly as a string.                                   | **One of**   |             |
+| `-token-file`                  | Path to a file containing the JWT token.                                       | **One of**   |             |
+| `-token-env`                   | Reads the JWT token from the `JWT_TOKEN` environment variable.                 | **One of**   |             |
 | `-remove-token-file`           | If using `-token-file`, remove the file after use.                             | No       | `false`     |
 | `-mailbox`                     | The email address of the mailbox to download (e.g., `user@example.com`).       | **Yes**  |             |
 | `-workspace`                   | The absolute path to a unique folder for storing downloaded artifacts.         | **Yes**  |             |
@@ -149,7 +149,7 @@ This mode is ideal for automated, continuous processing, as the Inbox is cleared
 
 **Example:**
 ```shell
-./o365mbx -token "YOUR_TOKEN" \
+./o365mbx -token-string "YOUR_TOKEN" \
           -mailbox "user@example.com" \
           -workspace "/path/to/output" \
           -processing-mode route \
@@ -168,7 +168,7 @@ This mode is useful for periodically downloading new emails without altering the
 
 **Example:**
 ```shell
-./o365mbx -token "YOUR_TOKEN" \
+./o365mbx -token-string "YOUR_TOKEN" \
           -mailbox "user@example.com" \
           -workspace "/path/to/output" \
           -processing-mode incremental
@@ -184,7 +184,7 @@ This mode is useful for creating a complete, one-time backup of the entire Inbox
 
 **Example:**
 ```shell
-./o365mbx -token "YOUR_TOKEN" \
+./o365mbx -token-string "YOUR_TOKEN" \
           -mailbox "user@example.com" \
           -workspace "/path/to/output" \
           -processing-mode full
