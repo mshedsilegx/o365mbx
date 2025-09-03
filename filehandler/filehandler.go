@@ -2,6 +2,8 @@ package filehandler
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -9,7 +11,6 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"strings"
 
 	log "github.com/sirupsen/logrus"
 
@@ -166,27 +167,54 @@ func (fh *FileHandler) SaveAttachment(ctx context.Context, attachmentName, messa
 	return nil
 }
 
-// SaveLastRunTimestamp saves the timestamp of the last successful run.
-func (fh *FileHandler) SaveLastRunTimestamp(timestamp string) error {
-	filePath := filepath.Join(fh.workspacePath, "last_run_timestamp.txt")
-	err := os.WriteFile(filePath, []byte(timestamp), 0644)
+// SaveAttachmentFromBytes saves an attachment from its base64 encoded content.
+func (fh *FileHandler) SaveAttachmentFromBytes(attachmentName, messageID, contentBytes string) error {
+	fileName := fmt.Sprintf("%s_%s_%s", sanitizeFileName(attachmentName), messageID, attachmentName)
+	filePath := filepath.Join(fh.workspacePath, fileName)
+
+	decodedBytes, err := base64.StdEncoding.DecodeString(contentBytes)
 	if err != nil {
-		return &apperrors.FileSystemError{Path: filePath, Msg: "failed to save last run timestamp", Err: err}
+		return fmt.Errorf("failed to decode base64 content for attachment %s: %w", attachmentName, err)
+	}
+
+	err = os.WriteFile(filePath, decodedBytes, 0644)
+	if err != nil {
+		return &apperrors.FileSystemError{Path: filePath, Msg: "failed to save attachment from bytes", Err: err}
+	}
+
+	log.WithField("attachmentName", attachmentName).Infof("Successfully saved attachment from contentBytes.")
+	return nil
+}
+
+// SaveState saves the RunState to the given file path as JSON.
+func (fh *FileHandler) SaveState(state *o365client.RunState, stateFilePath string) error {
+	data, err := json.Marshal(state)
+	if err != nil {
+		return fmt.Errorf("failed to marshal state to JSON: %w", err)
+	}
+	err = os.WriteFile(stateFilePath, data, 0644)
+	if err != nil {
+		return &apperrors.FileSystemError{Path: stateFilePath, Msg: "failed to save state file", Err: err}
 	}
 	return nil
 }
 
-// LoadLastRunTimestamp loads the timestamp of the last successful run.
-func (fh *FileHandler) LoadLastRunTimestamp() (string, error) {
-	filePath := filepath.Join(fh.workspacePath, "last_run_timestamp.txt")
-	content, err := os.ReadFile(filePath)
+// LoadState loads the RunState from the given file path.
+func (fh *FileHandler) LoadState(stateFilePath string) (*o365client.RunState, error) {
+	content, err := os.ReadFile(stateFilePath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return "", nil // File does not exist, first run
+			return &o365client.RunState{}, nil // File does not exist, return empty state
 		}
-		return "", &apperrors.FileSystemError{Path: filePath, Msg: "failed to read last run timestamp file", Err: err}
+		return nil, &apperrors.FileSystemError{Path: stateFilePath, Msg: "failed to read state file", Err: err}
 	}
-	return strings.TrimSpace(string(content)), nil
+
+	var state o365client.RunState
+	err = json.Unmarshal(content, &state)
+	if err != nil {
+		return nil, fmt.Errorf("failed to unmarshal state from JSON: %w", err)
+	}
+	return &state, nil
 }
 
 // sanitizeFileName removes invalid characters from a string to be used as a file name.
