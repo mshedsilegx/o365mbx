@@ -23,18 +23,25 @@ It is designed to be robust and efficient, with features for handling large mail
 
 The application can be configured using the following command-line arguments:
 
-| Argument      | Description                                                               | Required | Default |
-|---------------|---------------------------------------------------------------------------|----------|---------|
-| `-token`      | Access token for the Microsoft Graph API.                                 | **Yes**  |         |
-| `-mailbox`    | The email address of the mailbox to download (e.g., `user@example.com`).  | **Yes**  |         |
-| `-workspace`  | The absolute path to a unique folder for storing downloaded artifacts.    | **Yes**  |         |
-| `-config`     | Path to a JSON configuration file.                                        | No       |         |
-| `-timeout`    | HTTP client timeout in seconds.                                           | No       | `120`   |
-| `-parallel`   | Maximum number of parallel downloads.                                     | No       | `10`    |
-| `-api-rate`   | API calls per second for client-side rate limiting.                       | No       | `5.0`   |
-| `-api-burst`  | API burst capacity for client-side rate limiting.                         | No       | `10`    |
-| `-healthcheck`| Perform a health check on the mailbox and exit.                           | No       | `false` |
-| `-version`    | Display the application version and exit.                                 | No       | `false` |
+| Argument                       | Description                                                                    | Required | Default     |
+|--------------------------------|--------------------------------------------------------------------------------|----------|-------------|
+| `-token`                       | Access token for the Microsoft Graph API.                                      | **Yes**  |             |
+| `-mailbox`                     | The email address of the mailbox to download (e.g., `user@example.com`).       | **Yes**  |             |
+| `-workspace`                   | The absolute path to a unique folder for storing downloaded artifacts.         | **Yes**  |             |
+| `-config`                      | Path to a JSON configuration file.                                             | No       |             |
+| `-processing-mode`             | The processing mode. One of `full`, `incremental`, or `route`.                 | No       | `route`     |
+| `-processed-folder`            | In `route` mode, the folder to move successfully processed emails to.            | No       | `processed` |
+| `-error-folder`                | In `route` mode, the folder to move emails that failed to process.               | No       | `error`     |
+| `-timeout`                     | HTTP client timeout in seconds.                                                | No       | `120`       |
+| `-parallel`                    | Maximum number of parallel downloads.                                          | No       | `10`        |
+| `-max-retries`                 | Maximum number of retries for failed API calls.                                | No       | `5`         |
+| `-initial-backoff-seconds`     | Initial backoff in seconds for retries.                                        | No       | `1`         |
+| `-large-attachment-threshold-mb` | Threshold in MB for large attachments.                                         | No       | `20`        |
+| `-chunk-size-mb`               | Chunk size in MB for large attachment downloads.                               | No       | `4`         |
+| `-api-rate`                    | API calls per second for client-side rate limiting.                            | No       | `5.0`       |
+| `-api-burst`                   | API burst capacity for client-side rate limiting.                              | No       | `10`        |
+| `-healthcheck`                 | Perform a health check on the mailbox and exit.                                | No       | `false`     |
+| `-version`                     | Display the application version and exit.                                      | No       | `false`     |
 
 ## Configuration File
 
@@ -42,8 +49,16 @@ For more advanced configuration, you can use a JSON file (e.g., `config.json`) a
 
 ### Example `config.json`
 
+A configuration file can specify any of the command-line arguments.
+
 ```json
 {
+  "accessToken": "YOUR_ACCESS_TOKEN",
+  "mailboxName": "user@example.com",
+  "workspacePath": "/path/to/your/output",
+  "processingMode": "route",
+  "processedFolder": "Processed-Emails",
+  "errorFolder": "Failed-Emails",
   "httpClientTimeoutSeconds": 180,
   "maxRetries": 7,
   "initialBackoffSeconds": 2,
@@ -57,14 +72,20 @@ For more advanced configuration, you can use a JSON file (e.g., `config.json`) a
 
 ### Configuration Directives
 
-*   `httpClientTimeoutSeconds`: (Integer) Timeout in seconds for HTTP requests.
-*   `maxRetries`: (Integer) Maximum number of retries for failed API requests.
-*   `initialBackoffSeconds`: (Integer) Initial backoff duration in seconds for the retry mechanism.
-*   `largeAttachmentThresholdMB`: (Integer) Attachments larger than this size (in MB) will be downloaded in chunks.
-*   `chunkSizeMB`: (Integer) The size (in MB) of each chunk for large attachment downloads.
-*   `maxParallelDownloads`: (Integer) The maximum number of messages to process concurrently.
-*   `apiCallsPerSecond`: (Float) The number of API calls allowed per second.
-*   `apiBurst`: (Integer) The burst capacity for the API rate limiter.
+*   `accessToken`: (String) **Required**. Access token for the Microsoft Graph API.
+*   `mailboxName`: (String) **Required**. The email address of the mailbox to download.
+*   `workspacePath`: (String) **Required**. The absolute path to a unique folder for storing downloaded artifacts.
+*   `processingMode`: (String) The processing mode. One of `full`, `incremental`, or `route`. Default: `route`.
+*   `processedFolder`: (String) In `route` mode, the folder to move successfully processed emails to. Default: `processed`.
+*   `errorFolder`: (String) In `route` mode, the folder to move emails that failed to process. Default: `error`.
+*   `httpClientTimeoutSeconds`: (Integer) Timeout in seconds for HTTP requests. Default: `120`.
+*   `maxRetries`: (Integer) Maximum number of retries for failed API requests. Default: `5`.
+*   `initialBackoffSeconds`: (Integer) Initial backoff duration in seconds for the retry mechanism. Default: `1`.
+*   `largeAttachmentThresholdMB`: (Integer) Attachments larger than this size (in MB) will be downloaded in chunks. Default: `20`.
+*   `chunkSizeMB`: (Integer) The size (in MB) of each chunk for large attachment downloads. Default: `4`.
+*   `maxParallelDownloads`: (Integer) The maximum number of messages to process concurrently. Default: `10`.
+*   `apiCallsPerSecond`: (Float) The number of API calls allowed per second. Default: `5.0`.
+*   `apiBurst`: (Integer) The burst capacity for the API rate limiter. Default: `10`.
 
 ## Examples
 
@@ -110,6 +131,62 @@ First, create a `config.json` file. Then, run the application pointing to this f
 ```
 
 **Note on Overrides**: If `maxParallelDownloads` is `15` in `config.json` but you specify `-parallel 5` on the command line, the application will use `5`.
+
+## Processing Modes
+
+The application has three distinct processing modes, configured via the `-processing-mode` flag or the `processingMode` JSON key.
+
+### `route` (Default)
+
+This is the default mode. In `route` mode, the application will:
+1.  Process all messages currently in the Inbox.
+2.  Move successfully processed emails to the "processed" folder (or the folder specified by `-processed-folder`).
+3.  Move emails that failed to process to the "error" folder (or the folder specified by `-error-folder`).
+
+This mode is ideal for automated, continuous processing, as the Inbox is cleared of processed items after each run.
+
+**Example:**
+```shell
+./o365mbx -token "YOUR_TOKEN" \
+          -mailbox "user@example.com" \
+          -workspace "/path/to/output" \
+          -processing-mode route \
+          -processed-folder "Archive-Success" \
+          -error-folder "Archive-Failed"
+```
+
+### `incremental`
+
+In `incremental` mode, the application will:
+1.  Check the `last_run_timestamp.txt` file in the workspace to see when it last ran.
+2.  Process only emails that have arrived *since* that timestamp.
+3.  **Emails are not moved** from the Inbox.
+
+This mode is useful for periodically downloading new emails without altering the state of the mailbox.
+
+**Example:**
+```shell
+./o365mbx -token "YOUR_TOKEN" \
+          -mailbox "user@example.com" \
+          -workspace "/path/to/output" \
+          -processing-mode incremental
+```
+
+### `full`
+
+In `full` mode, the application will:
+1.  Process **all** emails in the Inbox, regardless of when it last ran.
+2.  **Emails are not moved** from the Inbox.
+
+This mode is useful for creating a complete, one-time backup of the entire Inbox.
+
+**Example:**
+```shell
+./o365mbx -token "YOUR_TOKEN" \
+          -mailbox "user@example.com" \
+          -workspace "/path/to/output" \
+          -processing-mode full
+```
 
 ## Health Check Mode
 
