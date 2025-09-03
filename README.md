@@ -43,6 +43,8 @@ The application can be configured using the following command-line arguments:
 | `-chunk-size-mb`               | Chunk size in MB for large attachment downloads.                               | No       | `4`         |
 | `-api-rate`                    | API calls per second for client-side rate limiting.                            | No       | `5.0`       |
 | `-api-burst`                   | API burst capacity for client-side rate limiting.                              | No       | `10`        |
+| `-dir-perms`                   | Permissions for created directories (e.g., `750`).                             | No       | `755`       |
+| `-file-perms`                  | Permissions for created files (e.g., `640`).                                   | No       | `644`       |
 | `-healthcheck`                 | Perform a health check on the mailbox and exit.                                | No       | `false`     |
 | `-version`                     | Display the application version and exit.                                      | No       | `false`     |
 
@@ -70,7 +72,9 @@ A configuration file can specify any of the command-line arguments. Note that on
   "chunkSizeMB": 8,
   "maxParallelDownloads": 15,
   "apiCallsPerSecond": 3.0,
-  "apiBurst": 6
+  "apiBurst": 6,
+  "dirPerms": 750,
+  "filePerms": 640
 }
 ```
 
@@ -93,6 +97,8 @@ A configuration file can specify any of the command-line arguments. Note that on
 *   `maxParallelDownloads`: (Integer) The maximum number of messages to process concurrently. Default: `10`.
 *   `apiCallsPerSecond`: (Float) The number of API calls allowed per second. Default: `5.0`.
 *   `apiBurst`: (Integer) The burst capacity for the API rate limiter. Default: `10`.
+*   `dirPerms`: (Integer) Permissions for created directories (in octal format). Default: `755`.
+*   `filePerms`: (Integer) Permissions for created files (in octal format). Default: `644`.
 
 ## JSON Output
 
