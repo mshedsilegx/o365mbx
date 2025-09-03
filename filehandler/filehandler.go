@@ -2,6 +2,7 @@ package filehandler
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
@@ -163,6 +164,25 @@ func (fh *FileHandler) SaveAttachment(ctx context.Context, attachmentName, messa
 		log.WithField("attachmentName", attachmentName).Infof("Successfully downloaded large attachment.")
 	}
 
+	return nil
+}
+
+// SaveAttachmentFromBytes saves an attachment from its base64 encoded content.
+func (fh *FileHandler) SaveAttachmentFromBytes(attachmentName, messageID, contentBytes string) error {
+	fileName := fmt.Sprintf("%s_%s_%s", sanitizeFileName(attachmentName), messageID, attachmentName)
+	filePath := filepath.Join(fh.workspacePath, fileName)
+
+	decodedBytes, err := base64.StdEncoding.DecodeString(contentBytes)
+	if err != nil {
+		return fmt.Errorf("failed to decode base64 content for attachment %s: %w", attachmentName, err)
+	}
+
+	err = os.WriteFile(filePath, decodedBytes, 0644)
+	if err != nil {
+		return &apperrors.FileSystemError{Path: filePath, Msg: "failed to save attachment from bytes", Err: err}
+	}
+
+	log.WithField("attachmentName", attachmentName).Infof("Successfully saved attachment from contentBytes.")
 	return nil
 }
 

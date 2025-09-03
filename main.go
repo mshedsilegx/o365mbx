@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"flag"
 	"fmt"
@@ -354,58 +355,83 @@ func runDownloadMode(ctx context.Context, cfg *Config, accessToken, mailboxName,
 							"hasDownloadURL": detailedAtt.DownloadURL != "",
 						}).Debug("Processing attachment for download.")
 
-						// Only proceed if it's a file attachment with a download URL
-						if detailedAtt.ODataType != "#microsoft.graph.fileAttachment" || detailedAtt.DownloadURL == "" {
-							log.WithFields(log.Fields{
-								"attachmentName": detailedAtt.Name,
-								"messageID":      msg.ID,
-								"attachmentID":   detailedAtt.ID,
-								"attachmentType": detailedAtt.ODataType,
-							}).Warn("Skipping attachment as it is not a downloadable file.")
-							return
+						// Preferred method: Download from URL
+						if detailedAtt.DownloadURL != "" {
+							err = fileHandler.SaveAttachment(ctx, detailedAtt.Name, msg.ID, detailedAtt.DownloadURL, accessToken, detailedAtt.Size)
+							if err != nil {
+								switch e := err.(type) {
+								case *apperrors.FileSystemError:
+									log.WithFields(log.Fields{
+										"attachmentName": detailedAtt.Name,
+										"messageID":      msg.ID,
+										"errorType":      "FileSystemError",
+										"path":           e.Path,
+										"error":          e.Unwrap(),
+									}).Errorf("File system error saving attachment: %s", e.Msg)
+								case *apperrors.APIError:
+									log.WithFields(log.Fields{
+										"attachmentName": detailedAtt.Name,
+										"messageID":      msg.ID,
+										"errorType":      "APIError",
+										"statusCode":     e.StatusCode,
+									}).Errorf("API error downloading attachment: %s", e.Msg)
+								default:
+									if errors.Is(err, context.Canceled) {
+										log.WithFields(log.Fields{
+											"attachmentName": detailedAtt.Name,
+											"messageID":      msg.ID,
+											"errorType":      "ContextCanceled",
+										}).Errorf("Attachment download cancelled by user.")
+									} else if errors.Is(err, context.DeadlineExceeded) {
+										log.WithFields(log.Fields{
+											"attachmentName": detailedAtt.Name,
+											"messageID":      msg.ID,
+											"errorType":      "ContextDeadlineExceeded",
+										}).Errorf("Attachment download timed out.")
+									} else {
+										log.WithFields(log.Fields{
+											"attachmentName": detailedAtt.Name,
+											"messageID":      msg.ID,
+											"errorType":      "UnknownError",
+											"error":          err,
+										}).Errorf("Unknown error saving attachment.")
+									}
+								}
+							}
+							return // Finished with this attachment
 						}
 
-						err = fileHandler.SaveAttachment(ctx, detailedAtt.Name, msg.ID, detailedAtt.DownloadURL, accessToken, detailedAtt.Size)
-						if err != nil {
-							switch e := err.(type) {
-							case *apperrors.FileSystemError:
-								log.WithFields(log.Fields{
-									"attachmentName": detailedAtt.Name,
-									"messageID":      msg.ID,
-									"errorType":      "FileSystemError",
-									"path":           e.Path,
-									"error":          e.Unwrap(),
-								}).Errorf("File system error saving attachment: %s", e.Msg)
-							case *apperrors.APIError:
-								log.WithFields(log.Fields{
-									"attachmentName": detailedAtt.Name,
-									"messageID":      msg.ID,
-									"errorType":      "APIError",
-									"statusCode":     e.StatusCode,
-								}).Errorf("API error downloading attachment: %s", e.Msg)
-							default:
-								if errors.Is(err, context.Canceled) {
+						// Fallback method: Decode from contentBytes
+						if detailedAtt.ContentBytes != "" {
+							err = fileHandler.SaveAttachmentFromBytes(detailedAtt.Name, msg.ID, detailedAtt.ContentBytes)
+							if err != nil {
+								switch e := err.(type) {
+								case *apperrors.FileSystemError:
 									log.WithFields(log.Fields{
 										"attachmentName": detailedAtt.Name,
 										"messageID":      msg.ID,
-										"errorType":      "ContextCanceled",
-									}).Errorf("Attachment download cancelled by user.")
-								} else if errors.Is(err, context.DeadlineExceeded) {
-									log.WithFields(log.Fields{
-										"attachmentName": detailedAtt.Name,
-										"messageID":      msg.ID,
-										"errorType":      "ContextDeadlineExceeded",
-									}).Errorf("Attachment download timed out.")
-								} else {
+										"errorType":      "FileSystemError",
+										"path":           e.Path,
+										"error":          e.Unwrap(),
+									}).Errorf("File system error saving attachment from bytes: %s", e.Msg)
+								default:
 									log.WithFields(log.Fields{
 										"attachmentName": detailedAtt.Name,
 										"messageID":      msg.ID,
 										"errorType":      "UnknownError",
 										"error":          err,
-									}).Errorf("Unknown error saving attachment.")
+									}).Errorf("Unknown error saving attachment from bytes.")
 								}
 							}
+							return // Finished with this attachment
 						}
+
+						// If neither method is possible
+						log.WithFields(log.Fields{
+							"attachmentName": detailedAtt.Name,
+							"messageID":      msg.ID,
+							"attachmentType": detailedAtt.ODataType,
+						}).Warn("Skipping attachment: No download URL or content bytes available.")
 					}(att)
 				}
 				attWg.Wait() // Wait for all attachments of this message to complete
