@@ -7,6 +7,7 @@ import (
 	"io"
 	"math/rand"
 	"net/http"
+	"net/url"
 	"time"
 
 	log "github.com/sirupsen/logrus"
@@ -96,12 +97,19 @@ func (c *O365Client) DoRequestWithRetry(req *http.Request) (*http.Response, erro
 // GetMessages fetches a list of messages for a given mailbox.
 func (c *O365Client) GetMessages(ctx context.Context, mailboxName, since string) ([]Message, error) { // ctx added
 	var allMessages []Message
-	url := fmt.Sprintf("%s/users/%s/messages", graphAPIBaseURL, mailboxName)
+
+	baseURL, err := url.Parse(fmt.Sprintf("%s/users/%s/messages", graphAPIBaseURL, mailboxName))
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse base URL: %w", err)
+	}
 
 	if since != "" {
-		url = fmt.Sprintf("%s?$filter=receivedDateTime ge '%s'", url, since)
+		params := url.Values{}
+		params.Add("$filter", fmt.Sprintf("receivedDateTime ge %s", since))
+		baseURL.RawQuery = params.Encode()
 	}
-	nextLink := url
+
+	nextLink := baseURL.String()
 
 	for nextLink != "" {
 		select {
