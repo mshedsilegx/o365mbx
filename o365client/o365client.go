@@ -205,7 +205,7 @@ func (c *O365Client) GetAttachments(ctx context.Context, mailboxName, messageID 
 
 // GetAttachmentDetails fetches the full details for a single attachment.
 func (c *O365Client) GetAttachmentDetails(ctx context.Context, mailboxName, messageID, attachmentID string) (*Attachment, error) {
-	url := fmt.Sprintf("%s/users/%s/messages/%s/attachments/%s?$select=id,name,size,contentType,isInline,contentBytes", graphAPIBaseURL, mailboxName, messageID, attachmentID)
+	url := fmt.Sprintf("%s/users/%s/messages/%s/attachments/%s", graphAPIBaseURL, mailboxName, messageID, attachmentID)
 
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
