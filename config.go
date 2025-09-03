@@ -14,6 +14,7 @@ type Config struct {
 	WorkspacePath              string  `json:"workspacePath"`
 	ProcessedFolder            string  `json:"processedFolder"`
 	ErrorFolder                string  `json:"errorFolder"`
+	ProcessingMode             string  `json:"processingMode"`
 	HTTPClientTimeoutSeconds   int     `json:"httpClientTimeoutSeconds"`
 	MaxRetries                 int     `json:"maxRetries"`
 	InitialBackoffSeconds      int     `json:"initialBackoffSeconds"`
@@ -31,6 +32,9 @@ func (c *Config) SetDefaults() {
 	}
 	if c.ErrorFolder == "" {
 		c.ErrorFolder = "error"
+	}
+	if c.ProcessingMode == "" {
+		c.ProcessingMode = "route"
 	}
 	if c.HTTPClientTimeoutSeconds == 0 {
 		c.HTTPClientTimeoutSeconds = 120
@@ -87,6 +91,10 @@ func (c *Config) Validate() error {
 	// Add more complex validation if needed, e.g., chunkSizeMB < LargeAttachmentThresholdMB
 	if c.ChunkSizeMB > c.LargeAttachmentThresholdMB {
 		return fmt.Errorf("chunkSizeMB (%d) cannot be greater than largeAttachmentThresholdMB (%d)", c.ChunkSizeMB, c.LargeAttachmentThresholdMB)
+	}
+	allowedModes := map[string]bool{"full": true, "incremental": true, "route": true}
+	if !allowedModes[c.ProcessingMode] {
+		return fmt.Errorf("invalid processingMode: %s. must be one of 'full', 'incremental', or 'route'", c.ProcessingMode)
 	}
 	return nil
 }

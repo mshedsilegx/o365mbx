@@ -68,6 +68,7 @@ func main() {
 	workspacePath := flag.String("workspace", "", "Unique folder to store all artifacts")
 	processedFolder := flag.String("processed-folder", "", "Folder to move processed emails to")
 	errorFolder := flag.String("error-folder", "", "Folder to move emails that failed to process")
+	processingMode := flag.String("processing-mode", "", "Processing mode: full, incremental, or route")
 	timeoutSeconds := flag.Int("timeout", 0, "HTTP client timeout in seconds")
 	maxParallelDownloads := flag.Int("parallel", 0, "Maximum number of parallel downloads")
 	apiCallsPerSecond := flag.Float64("api-rate", 0, "API calls per second for client-side rate limiting (default: 5.0)")
@@ -99,6 +100,9 @@ func main() {
 	}
 	if *errorFolder != "" {
 		cfg.ErrorFolder = *errorFolder
+	}
+	if *processingMode != "" {
+		cfg.ProcessingMode = *processingMode
 	}
 	if *timeoutSeconds != 0 {
 		cfg.HTTPClientTimeoutSeconds = *timeoutSeconds
@@ -222,18 +226,23 @@ func runDownloadMode(ctx context.Context, cfg *Config, rng *rand.Rand) {
 
 	// Load last run timestamp
 	var lastRunTimestamp string
-	lastRunTimestamp, err = fileHandler.LoadLastRunTimestamp()
-	if err != nil {
-		if fsErr, ok := err.(*apperrors.FileSystemError); ok {
-			log.Fatalf("Critical file system error: %s (Path: %s, Original: %v)", fsErr.Msg, fsErr.Path, fsErr.Unwrap())
-		} else {
-			log.Errorf("Error loading last run timestamp: %v", err)
+	if cfg.ProcessingMode != "full" {
+		var err error
+		lastRunTimestamp, err = fileHandler.LoadLastRunTimestamp()
+		if err != nil {
+			if fsErr, ok := err.(*apperrors.FileSystemError); ok {
+				log.Fatalf("Critical file system error: %s (Path: %s, Original: %v)", fsErr.Msg, fsErr.Path, fsErr.Unwrap())
+			} else {
+				log.Errorf("Error loading last run timestamp: %v", err)
+			}
 		}
-	}
-	if lastRunTimestamp != "" {
-		log.WithField("lastRunTimestamp", lastRunTimestamp).Infof("Fetching emails since last run.")
+		if lastRunTimestamp != "" {
+			log.WithField("lastRunTimestamp", lastRunTimestamp).Infof("Fetching emails since last run.")
+		} else {
+			log.Info("No last run timestamp found. Fetching all available emails.")
+		}
 	} else {
-		log.Info("No last run timestamp found. Fetching all available emails.")
+		log.Info("Running in 'full' mode. Fetching all available emails.")
 	}
 
 	// 2. Fetch emails
@@ -271,14 +280,17 @@ func runDownloadMode(ctx context.Context, cfg *Config, rng *rand.Rand) {
 	var latestTimestamp time.Time
 	var mu sync.Mutex // Mutex to protect latestTimestamp
 
-	processedFolderID, err := o365Client.GetFolderID(ctx, cfg.MailboxName, cfg.ProcessedFolder)
-	if err != nil {
-		log.Fatalf("Failed to get processed folder ID: %v", err)
-	}
-
-	errorFolderID, err := o365Client.GetFolderID(ctx, cfg.MailboxName, cfg.ErrorFolder)
-	if err != nil {
-		log.Fatalf("Failed to get error folder ID: %v", err)
+	var processedFolderID, errorFolderID string
+	if cfg.ProcessingMode == "route" {
+		var err error
+		processedFolderID, err = o365Client.GetFolderID(ctx, cfg.MailboxName, cfg.ProcessedFolder)
+		if err != nil {
+			log.Fatalf("Failed to get processed folder ID: %v", err)
+		}
+		errorFolderID, err = o365Client.GetFolderID(ctx, cfg.MailboxName, cfg.ErrorFolder)
+		if err != nil {
+			log.Fatalf("Failed to get error folder ID: %v", err)
+		}
 	}
 
 	for _, msg := range messages {
@@ -364,16 +376,18 @@ func runDownloadMode(ctx context.Context, cfg *Config, rng *rand.Rand) {
 			}
 
 			// 5. Move the email
-			var moveErr error
-			if isError {
-				moveErr = o365Client.MoveMessage(ctx, cfg.MailboxName, msg.ID, errorFolderID)
-			} else {
-				moveErr = o365Client.MoveMessage(ctx, cfg.MailboxName, msg.ID, processedFolderID)
-			}
+			if cfg.ProcessingMode == "route" {
+				var moveErr error
+				if isError {
+					moveErr = o365Client.MoveMessage(ctx, cfg.MailboxName, msg.ID, errorFolderID)
+				} else {
+					moveErr = o365Client.MoveMessage(ctx, cfg.MailboxName, msg.ID, processedFolderID)
+				}
 
-			if moveErr != nil {
-				log.Errorf("CRITICAL: Failed to move message %s to target folder: %v", msg.ID, moveErr)
-				return // Don't update timestamp if move fails
+				if moveErr != nil {
+					log.Errorf("CRITICAL: Failed to move message %s to target folder: %v", msg.ID, moveErr)
+					return // Don't update timestamp if move fails
+				}
 			}
 
 			// 6. Update timestamp only on complete success
@@ -394,17 +408,19 @@ func runDownloadMode(ctx context.Context, cfg *Config, rng *rand.Rand) {
 		latestTimestamp = time.Now()
 	}
 
-	// Save latest timestamp for next run
-	err = fileHandler.SaveLastRunTimestamp(latestTimestamp.Format(time.RFC3339))
-	if err != nil {
-		if fsErr, ok := err.(*apperrors.FileSystemError); ok {
-			log.WithFields(log.Fields{
-				"errorType": "FileSystemError",
-				"path":      fsErr.Path,
-				"error":     fsErr.Unwrap(),
-			}).Errorf("File system error saving last run timestamp: %s", fsErr.Msg)
-		} else {
-			log.WithField("error", err).Errorf("Error saving last run timestamp.")
+	if cfg.ProcessingMode != "full" {
+		// Save latest timestamp for next run
+		err := fileHandler.SaveLastRunTimestamp(latestTimestamp.Format(time.RFC3339))
+		if err != nil {
+			if fsErr, ok := err.(*apperrors.FileSystemError); ok {
+				log.WithFields(log.Fields{
+					"errorType": "FileSystemError",
+					"path":      fsErr.Path,
+					"error":     fsErr.Unwrap(),
+				}).Errorf("File system error saving last run timestamp: %s", fsErr.Msg)
+			} else {
+				log.WithField("error", err).Errorf("Error saving last run timestamp.")
+			}
 		}
 	}
 
