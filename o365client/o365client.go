@@ -21,7 +21,7 @@ const graphAPIBaseURL = "https://graph.microsoft.com/v1.0"
 // O365ClientInterface defines the interface for O365Client methods used by other packages.
 type O365ClientInterface interface {
 	DoRequestWithRetry(req *http.Request) (*http.Response, error)
-	GetMessages(ctx context.Context, mailboxName string, state *filehandler.RunState) ([]Message, error)
+	GetMessages(ctx context.Context, mailboxName string, state *RunState) ([]Message, error)
 	GetAttachments(ctx context.Context, mailboxName, messageID string) ([]Attachment, error)
 	GetAttachmentDetails(ctx context.Context, mailboxName, messageID, attachmentID string) (*Attachment, error)
 }
@@ -95,7 +95,7 @@ func (c *O365Client) DoRequestWithRetry(req *http.Request) (*http.Response, erro
 }
 
 // GetMessages fetches a list of messages for a given mailbox.
-func (c *O365Client) GetMessages(ctx context.Context, mailboxName string, state *filehandler.RunState) ([]Message, error) { // ctx added
+func (c *O365Client) GetMessages(ctx context.Context, mailboxName string, state *RunState) ([]Message, error) { // ctx added
 	var allMessages []Message
 
 	baseURL, err := url.Parse(fmt.Sprintf("%s/users/%s/messages", graphAPIBaseURL, mailboxName))
