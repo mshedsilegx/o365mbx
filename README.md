@@ -89,23 +89,15 @@ A configuration file can specify any of the command-line arguments.
 
 ## Examples
 
-### 1. Displaying the Application Version
+### 1. Running with Minimal Required Arguments
 
-To display the version of the application, use the `-version` flag:
-
-```shell
-./o365mbx -version
-```
-
-### 2. Running with Minimal Required Arguments
-
-This example runs the application with only the essential arguments:
+This example runs the application with only the essential arguments. All other settings will use their default values. For example, this will run in `route` mode and move emails to the `processed` and `error` folders in the target mailbox.
 
 ```shell
 ./o365mbx -token "YOUR_ACCESS_TOKEN" -mailbox "user@example.com" -workspace "/path/to/your/output"
 ```
 
-### 3. Running with All Command-Line Arguments
+### 2. Running with All Command-Line Arguments
 
 This example demonstrates using all available command-line flags to customize behavior:
 
@@ -119,18 +111,20 @@ This example demonstrates using all available command-line flags to customize be
           -api-burst 5
 ```
 
-### 4. Running with a Configuration File
+### 3. Running with a Configuration File
 
-First, create a `config.json` file. Then, run the application pointing to this file:
+You can specify all required arguments in the `config.json` file. If a setting is defined in both the config file and as a command-line flag, the command-line flag will always take precedence.
 
+If all required arguments (`accessToken`, `mailboxName`, `workspacePath`) are in the config file, you only need to provide the `-config` flag:
 ```shell
-./o365mbx -token "YOUR_ACCESS_TOKEN" \
-          -mailbox "user@example.com" \
-          -workspace "/path/to/your/output" \
-          -config "/path/to/your/config.json"
+./o365mbx -config "/path/to/your/config.json"
 ```
 
-**Note on Overrides**: If `maxParallelDownloads` is `15` in `config.json` but you specify `-parallel 5` on the command line, the application will use `5`.
+You can still provide other flags to override specific settings in the file:
+```shell
+# This will use the settings from the config file, but override the number of parallel downloads.
+./o365mbx -config "/path/to/your/config.json" -parallel 5
+```
 
 ## Processing Modes
 
@@ -196,14 +190,6 @@ To run a health check, use the `-healthcheck` flag:
 
 ```shell
 ./o365mbx -token "YOUR_ACCESS_TOKEN" -mailbox "user@example.com" -healthcheck
-```
-
-## Building from Source
-
-To build the application from source, you need to have Go installed. You can build it using the following command, which also embeds the version number:
-
-```shell
-go build -ldflags "-s -w -X main.version=$(cat version.txt)" -o o365mbx
 ```
 
 ## License
