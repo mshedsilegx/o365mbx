@@ -73,6 +73,10 @@ func main() {
 	maxParallelDownloads := flag.Int("parallel", 0, "Maximum number of parallel downloads")
 	apiCallsPerSecond := flag.Float64("api-rate", 0, "API calls per second for client-side rate limiting (default: 5.0)")
 	apiBurst := flag.Int("api-burst", 0, "API burst capacity for client-side rate limiting (default: 10)")
+	maxRetries := flag.Int("max-retries", 0, "Maximum number of retries for failed API calls")
+	initialBackoffSeconds := flag.Int("initial-backoff-seconds", 0, "Initial backoff in seconds for retries")
+	largeAttachmentThresholdMB := flag.Int("large-attachment-threshold-mb", 0, "Threshold in MB for large attachments")
+	chunkSizeMB := flag.Int("chunk-size-mb", 0, "Chunk size in MB for large attachment downloads")
 	flag.Parse()
 
 	if *displayVersion {
@@ -115,6 +119,18 @@ func main() {
 	}
 	if *apiBurst != 0 {
 		cfg.APIBurst = *apiBurst
+	}
+	if *maxRetries != 0 {
+		cfg.MaxRetries = *maxRetries
+	}
+	if *initialBackoffSeconds != 0 {
+		cfg.InitialBackoffSeconds = *initialBackoffSeconds
+	}
+	if *largeAttachmentThresholdMB != 0 {
+		cfg.LargeAttachmentThresholdMB = *largeAttachmentThresholdMB
+	}
+	if *chunkSizeMB != 0 {
+		cfg.ChunkSizeMB = *chunkSizeMB
 	}
 
 	// Validate loaded configuration
