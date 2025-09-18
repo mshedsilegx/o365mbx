@@ -236,10 +236,10 @@ func runDownloadMode(ctx context.Context, cfg *Config, accessToken, mailboxName,
 						}
 
 						log.WithFields(log.Fields{
-							"attachmentName": detailedAtt.Name,
-							"messageID":      msg.ID,
-							"attachmentType": detailedAtt.ODataType,
-							"hasDownloadURL": detailedAtt.DownloadURL != "",
+							"attachmentName":  detailedAtt.Name,
+							"messageID":       msg.ID,
+							"attachmentType":  detailedAtt.ODataType,
+							"hasDownloadURL":  detailedAtt.DownloadURL != "",
 							"hasContentBytes": detailedAtt.ContentBytes != "",
 						}).Debug("Processing attachment.")
 
