@@ -128,10 +128,10 @@ func (ep *EmailProcessor) CleanHTML(htmlContent string) (string, error) {
 	plainText := sb.String()
 
 	// Consolidate multiple newlines and spaces
-	plainText = strings.ReplaceAll(plainText, "\r\n", "\n")                      // Normalize line endings
-	plainText = strings.ReplaceAll(plainText, "\r", "\n")                        // Normalize line endings
+	plainText = strings.ReplaceAll(plainText, "\r\n", "\n")                       // Normalize line endings
+	plainText = strings.ReplaceAll(plainText, "\r", "\n")                         // Normalize line endings
 	plainText = regexp.MustCompile(`\\n{2,}`).ReplaceAllString(plainText, "\n\n") // Consolidate multiple newlines
-	plainText = spaceRegex.ReplaceAllString(plainText, " ")                      // Consolidate multiple spaces
+	plainText = spaceRegex.ReplaceAllString(plainText, " ")                       // Consolidate multiple spaces
 	plainText = strings.TrimSpace(plainText)
 
 	return plainText, nil
