@@ -63,7 +63,11 @@ func (fh *FileHandler) SaveAttachment(ctx context.Context, attachmentName, messa
 	if err != nil {
 		return &apperrors.FileSystemError{Path: filePath, Msg: "failed to create file for attachment", Err: err}
 	}
-	defer out.Close()
+	defer func() {
+		if err := out.Close(); err != nil {
+			log.Warnf("Error closing file %s: %v", filePath, err)
+		}
+	}()
 
 	if attachmentSize <= fh.largeAttachmentThreshold {
 		// Existing direct download logic for smaller attachments
@@ -92,7 +96,11 @@ func (fh *FileHandler) SaveAttachment(ctx context.Context, attachmentName, messa
 				return fmt.Errorf("failed to download attachment from %s: %w", downloadURL, err)
 			}
 		}
-		defer resp.Body.Close()
+		defer func() {
+			if err := resp.Body.Close(); err != nil {
+				log.Warnf("Error closing response body for small attachment: %v", err)
+			}
+		}()
 
 		if resp.StatusCode != http.StatusOK {
 			return &apperrors.APIError{StatusCode: resp.StatusCode, Msg: fmt.Sprintf("failed to download small attachment from %s", downloadURL)}
@@ -147,7 +155,11 @@ func (fh *FileHandler) SaveAttachment(ctx context.Context, attachmentName, messa
 					return fmt.Errorf("failed to download attachment chunk from %s (range %d-%d): %w", downloadURL, downloadedBytes, endByte, err)
 				}
 			}
-			defer resp.Body.Close() // Defer inside the loop, will be closed on each iteration
+			defer func() {
+				if err := resp.Body.Close(); err != nil {
+					log.Warnf("Error closing response body for large attachment chunk: %v", err)
+				}
+			}() // Defer inside the loop, will be closed on each iteration
 
 			// Graph API returns 206 Partial Content for range requests, 200 OK if range is ignored or full file.
 			if resp.StatusCode != http.StatusPartialContent && resp.StatusCode != http.StatusOK {

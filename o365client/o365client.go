@@ -64,7 +64,9 @@ func (c *O365Client) DoRequestWithRetry(req *http.Request) (*http.Response, erro
 			// Check for retryable status codes
 			if resp.StatusCode == http.StatusTooManyRequests || (resp.StatusCode >= 500 && resp.StatusCode <= 599) {
 				log.WithFields(log.Fields{"statusCode": resp.StatusCode, "attempt": i + 1, "maxRetries": maxRetries}).Warn("Retrying due to status code.")
-				resp.Body.Close()                                       // Close the body before retrying
+				if err := resp.Body.Close(); err != nil {
+					log.Warnf("Failed to close response body: %v", err)
+				}
 				lastErr = fmt.Errorf("HTTP status %d", resp.StatusCode) // Store the status code as an error
 				// Continue to next iteration for retry
 			} else {
@@ -137,11 +139,17 @@ func (c *O365Client) GetMessages(ctx context.Context, mailboxName string, state 
 		if err != nil {
 			return nil, fmt.Errorf("failed to fetch messages: %w", err)
 		}
-		defer resp.Body.Close()
+		defer func() {
+			if err := resp.Body.Close(); err != nil {
+				log.Warnf("Error closing response body in GetMessages: %v", err)
+			}
+		}()
 
 		if resp.StatusCode != http.StatusOK {
 			errorBody, _ := io.ReadAll(resp.Body) // Read body for detailed error
-			resp.Body.Close()                     // Close body after reading
+			if err := resp.Body.Close(); err != nil {
+				log.Warnf("Error closing response body after reading error: %v", err)
+			}
 			if resp.StatusCode == http.StatusUnauthorized {
 				return nil, &apperrors.AuthError{Msg: "invalid or expired access token"}
 			}
@@ -191,11 +199,17 @@ func (c *O365Client) GetAttachments(ctx context.Context, mailboxName, messageID 
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch attachments: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			log.Warnf("Error closing response body in GetAttachments: %v", err)
+		}
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		errorBody, _ := io.ReadAll(resp.Body) // Read body for detailed error
-		resp.Body.Close()                     // Close body after reading
+		if err := resp.Body.Close(); err != nil {
+			log.Warnf("Error closing response body after reading error in GetAttachments: %v", err)
+		}
 		if resp.StatusCode == http.StatusUnauthorized {
 			return nil, &apperrors.AuthError{Msg: "invalid or expired access token"}
 		}
@@ -232,11 +246,17 @@ func (c *O365Client) GetAttachmentDetails(ctx context.Context, mailboxName, mess
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch attachment details: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			log.Warnf("Error closing response body in GetAttachmentDetails: %v", err)
+		}
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		errorBody, _ := io.ReadAll(resp.Body)
-		resp.Body.Close()
+		if err := resp.Body.Close(); err != nil {
+			log.Warnf("Error closing response body after reading error in GetAttachmentDetails: %v", err)
+		}
 		if resp.StatusCode == http.StatusUnauthorized {
 			return nil, &apperrors.AuthError{Msg: "invalid or expired access token"}
 		}
@@ -273,11 +293,17 @@ func (c *O365Client) GetMailboxStatistics(ctx context.Context, mailboxName strin
 	if err != nil {
 		return 0, fmt.Errorf("failed to fetch mailbox statistics: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			log.Warnf("Error closing response body in GetMailboxStatistics: %v", err)
+		}
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		errorBody, _ := io.ReadAll(resp.Body)
-		resp.Body.Close()
+		if err := resp.Body.Close(); err != nil {
+			log.Warnf("Error closing response body after reading error in GetMailboxStatistics: %v", err)
+		}
 		if resp.StatusCode == http.StatusUnauthorized {
 			return 0, &apperrors.AuthError{Msg: "invalid or expired access token"}
 		}
