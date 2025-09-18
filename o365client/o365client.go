@@ -7,6 +7,7 @@ import (
 	"io"
 	"math/rand"
 	"net/http"
+	"net/url"
 	"time"
 
 	log "github.com/sirupsen/logrus"
@@ -20,8 +21,9 @@ const graphAPIBaseURL = "https://graph.microsoft.com/v1.0"
 // O365ClientInterface defines the interface for O365Client methods used by other packages.
 type O365ClientInterface interface {
 	DoRequestWithRetry(req *http.Request) (*http.Response, error)
-	GetMessages(ctx context.Context, mailboxName, since string) ([]Message, error)
+	GetMessages(ctx context.Context, mailboxName string, state *RunState) ([]Message, error)
 	GetAttachments(ctx context.Context, mailboxName, messageID string) ([]Attachment, error)
+	GetAttachmentDetails(ctx context.Context, mailboxName, messageID, attachmentID string) (*Attachment, error)
 }
 
 type O365Client struct {
@@ -93,14 +95,28 @@ func (c *O365Client) DoRequestWithRetry(req *http.Request) (*http.Response, erro
 }
 
 // GetMessages fetches a list of messages for a given mailbox.
-func (c *O365Client) GetMessages(ctx context.Context, mailboxName, since string) ([]Message, error) { // ctx added
+func (c *O365Client) GetMessages(ctx context.Context, mailboxName string, state *RunState) ([]Message, error) { // ctx added
 	var allMessages []Message
-	url := fmt.Sprintf("%s/users/%s/messages", graphAPIBaseURL, mailboxName)
 
-	if since != "" {
-		url = fmt.Sprintf("%s?$filter=receivedDateTime ge %s", url, since)
+	baseURL, err := url.Parse(fmt.Sprintf("%s/users/%s/messages", graphAPIBaseURL, mailboxName))
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse base URL: %w", err)
 	}
-	nextLink := url
+
+	params := url.Values{}
+	// Always sort by receivedDateTime and then by id for deterministic ordering.
+	params.Add("$orderby", "receivedDateTime asc, id asc")
+
+	// If a timestamp is available from a previous run, use it to filter.
+	if !state.LastRunTimestamp.IsZero() {
+		timestamp := state.LastRunTimestamp.Format(time.RFC3339Nano)
+		// Use 'ge' (greater than or equal) to include items with the same timestamp.
+		// The calling function will be responsible for skipping the one with the matching ID.
+		params.Add("$filter", fmt.Sprintf("receivedDateTime ge %s", timestamp))
+	}
+	baseURL.RawQuery = params.Encode()
+
+	nextLink := baseURL.String()
 
 	for nextLink != "" {
 		select {
@@ -202,6 +218,45 @@ func (c *O365Client) GetAttachments(ctx context.Context, mailboxName, messageID 
 	return response.Value, nil
 }
 
+// GetAttachmentDetails fetches the full details for a single attachment.
+func (c *O365Client) GetAttachmentDetails(ctx context.Context, mailboxName, messageID, attachmentID string) (*Attachment, error) {
+	url := fmt.Sprintf("%s/users/%s/messages/%s/attachments/%s", graphAPIBaseURL, mailboxName, messageID, attachmentID)
+
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create HTTP request for attachment details: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+c.accessToken)
+
+	resp, err := c.DoRequestWithRetry(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch attachment details: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		errorBody, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode == http.StatusUnauthorized {
+			return nil, &apperrors.AuthError{Msg: "invalid or expired access token"}
+		}
+		return nil, &apperrors.APIError{StatusCode: resp.StatusCode, Msg: string(errorBody)}
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response body for attachment details: %w", err)
+	}
+
+	var attachment Attachment
+	err = json.Unmarshal(body, &attachment)
+	if err != nil {
+		return nil, fmt.Errorf("failed to unmarshal attachment details response: %w", err)
+	}
+
+	return &attachment, nil
+}
+
 // GetMailboxStatistics fetches the total message count for a given mailbox's Inbox.
 func (c *O365Client) GetMailboxStatistics(ctx context.Context, mailboxName string) (int, error) {
 	// URL to get the message count of the Inbox folder
@@ -259,10 +314,18 @@ type Message struct {
 
 // Attachment represents an attachment from O365
 type Attachment struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	Size        int    `json:"size"`
-	ContentType string `json:"contentType"`
-	IsInline    bool   `json:"isInline"`
-	DownloadURL string `json:"@microsoft.graph.downloadUrl"`
+	ID           string `json:"id"`
+	ODataType    string `json:"@odata.type"`
+	Name         string `json:"name"`
+	Size         int    `json:"size"`
+	ContentType  string `json:"contentType"`
+	IsInline     bool   `json:"isInline"`
+	DownloadURL  string `json:"@microsoft.graph.downloadUrl"`
+	ContentBytes string `json:"contentBytes"`
+}
+
+// RunState represents the state of the last successful incremental run.
+type RunState struct {
+	LastRunTimestamp time.Time `json:"lastRunTimestamp"`
+	LastMessageID    string    `json:"lastMessageId"`
 }
