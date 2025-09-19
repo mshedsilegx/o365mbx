@@ -35,7 +35,7 @@ The application saves each email into a dedicated folder within the specified wo
 ```
 
 *   **`metadata.json`**: A JSON file containing detailed metadata about the email, including sender, recipients, subject, date, and information about the attachments.
-*   **`body.html` / `body.txt`**: The body of the email. The extension depends on the original content type or the conversion option specified.
+*   **`body.html` / `body.txt` / `body.pdf`**: The body of the email. The extension depends on the original content type or the conversion option specified.
 *   **`attachments/`**: A sub-directory containing all attachments from the email. Each attachment is prefixed with a two-digit sequence number.
 
 ## Metadata JSON Specifications
@@ -133,10 +133,11 @@ All configuration options can be controlled via command-line arguments. Any flag
 | **Required**                    |                                                                           |          |         |
 | `-mailbox`                      | The email address of the mailbox to download. Can also be set in config.  | **Yes**  |         |
 | `-workspace`                    | The absolute path for storing artifacts. Can also be set in config.       | **Yes**  |         |
-| **Token (Choose One)**          |                                                                           | **Yes**  |         |
+| **Token (Choose one)**          | Source can be string, file or environment variable                        | **Yes**  |         |
 | `-token-string`                 | JWT token as a string.                                                    |          |         |
 | `-token-file`                   | Path to a file containing the JWT token.                                  |          |         |
 | `-token-env`                    | Read JWT token from the `JWT_TOKEN` environment variable.                 |          | `false` |
+| `-remove-token-file`            | Remove the token file after use.                                          | No       | `false` |
 | **General**                     |                                                                           |          |         |
 | `-config`                       | Path to a JSON configuration file.                                        | No       |         |
 | `-debug`                        | Enable debug logging.                                                     | No       | `false` |
@@ -163,7 +164,6 @@ All configuration options can be controlled via command-line arguments. Any flag
 | **Attachments**                 |                                                                           |          |         |
 | `-large-attachment-threshold-mb`| Threshold in MB for an attachment to be considered "large".               | No       | `20`    |
 | `-chunk-size-mb`                | Chunk size in MB for large attachment downloads.                          | No       | `8`     |
-| `-remove-token-file`            | Remove the token file after use.                                          | No       | `false` |
 
 ## Configuration File
 
@@ -315,6 +315,14 @@ This example configures the application for maximum download speed by increasing
 ### 7. Bandwidth-Limited Download
 
 This example throttles the total download speed to 50 MB/s to avoid hitting API data egress limits during a very large-scale download.
+
+```shell
+./o365mbx \
+    -mailbox "user@example.com" \
+    -workspace "/path/to/your/output" \
+    -token-file "/path/to/token.txt" \
+    -bandwidth-limit-mbs 50.0
+```
 
 ### 8. Body Conversion to Plain Text
 
