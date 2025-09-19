@@ -149,14 +149,18 @@ func runDownloadMode(ctx context.Context, cfg *Config, o365Client o365client.O36
 
 				var processingErr error
 				processedBody, err := emailProcessor.ProcessBody(msg.Body.Content, cfg.ConvertBody, cfg.ChromiumPath)
+				effectiveConvertBody := cfg.ConvertBody
 				if err != nil {
 					atomic.AddUint32(&stats.NonFatalErrors, 1)
 					log.WithFields(log.Fields{"messageID": msg.ID, "error": err}).Warn("Failed to process message body.")
-					processedBody = msg.Body.Content
+					processedBody = msg.Body.Content // Fallback to original content
 					processingErr = err
+					if cfg.ConvertBody == "pdf" {
+						effectiveConvertBody = "none" // Save with correct extension for the fallback content
+					}
 				}
 
-				msgPath, err := fileHandler.SaveMessage(&msg, processedBody, cfg.ConvertBody)
+				msgPath, err := fileHandler.SaveMessage(&msg, processedBody, effectiveConvertBody)
 				if err != nil {
 					atomic.AddUint32(&stats.NonFatalErrors, 1)
 					log.WithFields(log.Fields{"messageID": msg.ID, "error": err}).Errorf("Error saving email message.")
