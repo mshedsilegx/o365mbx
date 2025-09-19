@@ -147,25 +147,23 @@ func runDownloadMode(ctx context.Context, cfg *Config, o365Client o365client.O36
 				atomic.AddUint32(&stats.MessagesProcessed, 1)
 				log.WithFields(log.Fields{"messageID": msg.ID, "subject": msg.Subject}).Infof("Processing message.")
 
-				var processingErr error
-				processedBody, err := emailProcessor.ProcessBody(msg.Body.Content, cfg.ConvertBody, cfg.ChromiumPath)
+				processedBody, processingErr := emailProcessor.ProcessBody(msg.Body.Content, cfg.ConvertBody, cfg.ChromiumPath)
 				effectiveConvertBody := cfg.ConvertBody
-				if err != nil {
+				if processingErr != nil {
 					atomic.AddUint32(&stats.NonFatalErrors, 1)
-					log.WithFields(log.Fields{"messageID": msg.ID, "error": err}).Warn("Failed to process message body.")
+					log.WithFields(log.Fields{"messageID": msg.ID, "error": processingErr}).Warn("Failed to process message body.")
 					processedBody = msg.Body.Content // Fallback to original content
-					processingErr = err
 					if cfg.ConvertBody == "pdf" {
 						effectiveConvertBody = "none" // Save with correct extension for the fallback content
 					}
 				}
 
-				msgPath, err := fileHandler.SaveMessage(&msg, processedBody, effectiveConvertBody)
-				if err != nil {
+				msgPath, saveErr := fileHandler.SaveMessage(&msg, processedBody, effectiveConvertBody)
+				if saveErr != nil {
 					atomic.AddUint32(&stats.NonFatalErrors, 1)
-					log.WithFields(log.Fields{"messageID": msg.ID, "error": err}).Errorf("Error saving email message.")
+					log.WithFields(log.Fields{"messageID": msg.ID, "error": saveErr}).Errorf("Error saving email message.")
 					if processingErr == nil {
-						processingErr = err
+						processingErr = saveErr
 					}
 					<-semaphore
 					continue

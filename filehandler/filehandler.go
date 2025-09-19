@@ -155,7 +155,11 @@ func (fh *FileHandler) SaveMessage(message *o365client.Message, bodyContent inte
 	if err != nil {
 		return "", &apperrors.FileSystemError{Path: metadataPath, Msg: "failed to create metadata file", Err: err}
 	}
-	defer metadataFile.Close()
+	defer func() {
+		if err := metadataFile.Close(); err != nil {
+			log.Warnf("Failed to close metadata file: %v", err)
+		}
+	}()
 
 	encoder := json.NewEncoder(metadataFile)
 	encoder.SetIndent("", "  ")
@@ -235,7 +239,11 @@ func (fh *FileHandler) SaveAttachment(ctx context.Context, msgPath string, att o
 			}
 			return nil, fmt.Errorf("failed to download attachment from %s: %w", att.DownloadURL, err)
 		}
-		defer resp.Body.Close()
+		defer func() {
+			if err := resp.Body.Close(); err != nil {
+				log.Warnf("Failed to close response body for small attachment: %v", err)
+			}
+		}()
 
 		if resp.StatusCode != http.StatusOK {
 			return nil, &apperrors.APIError{StatusCode: resp.StatusCode, Msg: fmt.Sprintf("failed to download small attachment from %s", att.DownloadURL)}
@@ -286,12 +294,16 @@ func (fh *FileHandler) SaveAttachment(ctx context.Context, msgPath string, att o
 			}
 
 			if resp.StatusCode != http.StatusPartialContent && resp.StatusCode != http.StatusOK {
-				resp.Body.Close()
+				if err := resp.Body.Close(); err != nil {
+					log.Warnf("Failed to close response body for failed large attachment chunk: %v", err)
+				}
 				return nil, &apperrors.APIError{StatusCode: resp.StatusCode, Msg: fmt.Sprintf("failed to download attachment chunk from %s (range %d-%d)", att.DownloadURL, downloadedBytes, endByte)}
 			}
 
 			n, err := io.Copy(out, resp.Body)
-			resp.Body.Close()
+			if err := resp.Body.Close(); err != nil {
+				log.Warnf("Failed to close response body for large attachment chunk: %v", err)
+			}
 			if err != nil {
 				return nil, &apperrors.FileSystemError{Path: filePath, Msg: "failed to write attachment chunk content to file", Err: err}
 			}
@@ -359,7 +371,11 @@ func (fh *FileHandler) WriteAttachmentsToMetadata(msgPath string, attachments []
 	if err != nil {
 		return &apperrors.FileSystemError{Path: metadataPath, Msg: "failed to create metadata file for final update", Err: err}
 	}
-	defer metadataFile.Close()
+	defer func() {
+		if err := metadataFile.Close(); err != nil {
+			log.Warnf("Failed to close metadata file for final update: %v", err)
+		}
+	}()
 
 	encoder := json.NewEncoder(metadataFile)
 	encoder.SetIndent("", "  ")

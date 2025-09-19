@@ -64,7 +64,13 @@ func (ep *EmailProcessor) ConvertToPDF(htmlContent, chromiumPath string) ([]byte
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate PDF: %w", err)
 	}
-	defer pdf.Close()
+	defer func() {
+		if err := pdf.Close(); err != nil {
+			// Using a generic logger as we don't have access to logrus here
+			// In a real app, you might pass a logger in
+			fmt.Printf("Warning: failed to close PDF reader stream: %v\n", err)
+		}
+	}()
 
 	pdfBytes, err := io.ReadAll(pdf)
 	if err != nil {
