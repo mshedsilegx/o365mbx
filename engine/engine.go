@@ -137,14 +137,15 @@ func runDownloadMode(ctx context.Context, cfg *Config, o365Client o365client.O36
 				log.WithFields(log.Fields{"messageID": msg.ID, "subject": msg.Subject}).Infof("Processing message.")
 
 				var processingErr error
-				cleanedBody, err := emailProcessor.CleanHTML(msg.Body.Content)
+				processedBody, err := emailProcessor.ProcessBody(msg.Body.Content, cfg.ConvertBody, cfg.ChromiumPath)
 				if err != nil {
 					atomic.AddUint32(&stats.NonFatalErrors, 1)
-					log.WithFields(log.Fields{"messageID": msg.ID, "error": err}).Warn("Failed to clean HTML for message.")
-					cleanedBody = msg.Body.Content
+					log.WithFields(log.Fields{"messageID": msg.ID, "error": err}).Warn("Failed to process message body.")
+					processedBody = msg.Body.Content
 					processingErr = err
 				}
-				if err := fileHandler.SaveEmailBody(msg.Subject, msg.ID, cleanedBody); err != nil {
+
+				if err := fileHandler.SaveEmailBody(msg.Subject, msg.ID, processedBody, cfg.ConvertBody); err != nil {
 					atomic.AddUint32(&stats.NonFatalErrors, 1)
 					log.WithFields(log.Fields{"messageID": msg.ID, "error": err}).Errorf("Error saving email body.")
 					if processingErr == nil {

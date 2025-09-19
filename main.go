@@ -50,6 +50,8 @@ func main() {
 	largeAttachmentThresholdMB := flag.Int("large-attachment-threshold-mb", 0, "Threshold in MB for large attachments.")
 	stateSaveInterval := flag.Int("state-save-interval", 0, "Save state every N messages.")
 	bandwidthLimitMBs := flag.Float64("bandwidth-limit-mbs", 0, "Bandwidth limit in MB/s for downloads (0 for disabled).")
+	convertBody := flag.String("convert-body", "", "Convert body to 'text' or 'pdf'. Default is 'none'.")
+	chromiumPath := flag.String("chromium-path", "", "Path to headless chromium binary for PDF conversion.")
 	flag.Parse()
 
 	// --- Configuration Loading and Merging ---
@@ -100,6 +102,10 @@ func main() {
 			cfg.StateSaveInterval = *stateSaveInterval
 		case "bandwidth-limit-mbs":
 			cfg.BandwidthLimitMBs = *bandwidthLimitMBs
+		case "convert-body":
+			cfg.ConvertBody = *convertBody
+		case "chromium-path":
+			cfg.ChromiumPath = *chromiumPath
 		}
 	})
 

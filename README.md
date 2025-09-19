@@ -57,6 +57,9 @@ All configuration options can be controlled via command-line arguments. Any flag
 | `-state-save-interval`          | Save state every N messages during a run.                                 | No       | `100`   |
 | `-processed-folder`             | Destination folder for successful messages in `route` mode.               | No       | `Processed`|
 | `-error-folder`                 | Destination folder for failed messages in `route` mode.                   | No       | `Error` |
+| **Email Body Conversion**       |                                                                           |          |         |
+| `-convert-body`                 | Conversion mode for email bodies: `none`, `text`, or `pdf`.               | No       | `none`  |
+| `-chromium-path`                | Absolute path to the headless Chromium/Chrome binary (required for `pdf`).| No       |         |
 | **Performance & Limits**        |                                                                           |          |         |
 | `-parallel`                     | Maximum number of parallel workers.                                       | No       | `10`    |
 | `-timeout`                      | HTTP client timeout in seconds.                                           | No       | `120`   |
@@ -125,6 +128,9 @@ For a more permanent setup, you can use a JSON file (e.g., `config.json`) and pa
     *   `bandwidthLimitMBs`: (Float) The download speed limit in megabytes per second. `0` means disabled.
 *   **State**:
     *   `stateSaveInterval`: (Integer) How often to save the state file during a run (number of messages).
+*   **Email Body Conversion**:
+    *   `convertBody`: (String) The conversion mode for email bodies. Can be `none` (no conversion, saves `.html`), `text` (converts to plain text, saves `.txt`), or `pdf` (converts to PDF, saves `.pdf`). Defaults to `none`.
+    *   `chromiumPath`: (String) The absolute path to a headless Chromium or Google Chrome binary. This is **required** if `convertBody` is set to `pdf`.
 
 ### A Note on API Permissions
 
