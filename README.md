@@ -38,6 +38,80 @@ The application saves each email into a dedicated folder within the specified wo
 *   **`body.html` / `body.txt`**: The body of the email. The extension depends on the original content type or the conversion option specified.
 *   **`attachments/`**: A sub-directory containing all attachments from the email. Each attachment is prefixed with a two-digit sequence number.
 
+## Metadata JSON Specifications
+
+The `metadata.json` file provides a detailed overview of the downloaded email.
+
+### Field Descriptions
+
+*   **`to`**: A list of recipients in the "To" field. Each recipient object contains an `emailAddress` object with `name` and `address`.
+*   **`cc`**: A list of recipients in the "Cc" field. Same structure as `to`.
+*   **`from`**: The sender of the email. Same structure as a recipient object.
+*   **`subject`**: The subject line of the email.
+*   **`received_date`**: The date and time the email was received, in ISO 8601 format (UTC).
+*   **`body`**: The filename of the email body (e.g., `body.html` or `body.txt`).
+*   **`content_type_of_body`**: The content type of the saved body file (`html`, `text`, or `pdf`).
+*   **`attachment_counts`**: The total number of attachments in the email.
+*   **`list_of_attachments`**: A list of objects, where each object represents an attachment and contains the following fields:
+    *   `attachment_name_in_message`: The original filename of the attachment.
+    *   `content_type_of_attachment`: The MIME type of the attachment.
+    *   `size_of_attachment_in_bytes`: The size of the attachment in bytes.
+    *   `attachment_name_stored_after_download`: The filename used to save the attachment in the `attachments` folder (e.g., `01_report.pdf`).
+
+### Example `metadata.json`
+
+```json
+{
+  "to": [
+    {
+      "emailAddress": {
+        "name": "Jane Doe",
+        "address": "jane.doe@example.com"
+      }
+    }
+  ],
+  "cc": [
+    {
+      "emailAddress": {
+        "name": "John Smith",
+        "address": "john.smith@example.com"
+      }
+    }
+  ],
+  "from": {
+    "emailAddress": {
+      "name": "Marketing Team",
+      "address": "marketing@example.com"
+    }
+  },
+  "subject": "Q3 Financial Report and Project Updates",
+  "received_date": "2024-07-21T14:30:00Z",
+  "body": "body.html",
+  "content_type_of_body": "html",
+  "attachment_counts": 3,
+  "list_of_attachments": [
+    {
+      "attachment_name_in_message": "Q3_Financials.xlsx",
+      "content_type_of_attachment": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "size_of_attachment_in_bytes": 123456,
+      "attachment_name_stored_after_download": "01_Q3_Financials.xlsx"
+    },
+    {
+      "attachment_name_in_message": "Project_Timeline.pdf",
+      "content_type_of_attachment": "application/pdf",
+      "size_of_attachment_in_bytes": 789012,
+      "attachment_name_stored_after_download": "02_Project_Timeline.pdf"
+    },
+    {
+      "attachment_name_in_message": "company_logo.png",
+      "content_type_of_attachment": "image/png",
+      "size_of_attachment_in_bytes": 34567,
+      "attachment_name_stored_after_download": "03_company_logo.png"
+    }
+  ]
+}
+```
+
 ## Token Management
 
 The application requires a valid JWT access token for the Microsoft Graph API. You must provide the token using **exactly one** of the following methods:
