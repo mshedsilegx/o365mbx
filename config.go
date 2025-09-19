@@ -17,6 +17,8 @@ type Config struct {
 	MaxParallelDownloads       int     `json:"maxParallelDownloads"`
 	APICallsPerSecond          float64 `json:"apiCallsPerSecond"`
 	APIBurst                   int     `json:"apiBurst"`
+	StateSaveInterval          int     `json:"stateSaveInterval"`
+	BandwidthLimitMBs          float64 `json:"bandwidthLimitMBs"`
 }
 
 // SetDefaults sets default values for the configuration parameters.
@@ -45,6 +47,12 @@ func (c *Config) SetDefaults() {
 	if c.APIBurst == 0 {
 		c.APIBurst = 10 // Default: burst of 10 calls
 	}
+	if c.StateSaveInterval == 0 {
+		c.StateSaveInterval = 100 // Default: save state every 100 messages
+	}
+	if c.BandwidthLimitMBs == 0 {
+		c.BandwidthLimitMBs = 0 // Default: 0 means disabled
+	}
 }
 
 // Validate checks if the configuration parameters are valid.
@@ -72,6 +80,12 @@ func (c *Config) Validate() error {
 	}
 	if c.APIBurst < 0 {
 		return fmt.Errorf("apiBurst cannot be negative")
+	}
+	if c.StateSaveInterval <= 0 {
+		return fmt.Errorf("stateSaveInterval must be positive")
+	}
+	if c.BandwidthLimitMBs < 0 {
+		return fmt.Errorf("bandwidthLimitMBs cannot be negative")
 	}
 	// Add more complex validation if needed, e.g., chunkSizeMB < LargeAttachmentThresholdMB
 	if c.ChunkSizeMB > c.LargeAttachmentThresholdMB {

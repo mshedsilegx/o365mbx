@@ -11,8 +11,11 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
+	"time"
 
 	log "github.com/sirupsen/logrus"
+	"golang.org/x/time/rate"
 
 	"o365mbx/apperrors"
 	"o365mbx/o365client"
@@ -23,23 +26,45 @@ type FileHandler struct {
 	o365Client               o365client.O365ClientInterface
 	largeAttachmentThreshold int // in bytes
 	chunkSize                int // in bytes
+	bandwidthLimiter         *rate.Limiter
 }
 
-func NewFileHandler(workspacePath string, o365Client o365client.O365ClientInterface, largeAttachmentThresholdMB, chunkSizeMB int) *FileHandler {
+func NewFileHandler(workspacePath string, o365Client o365client.O365ClientInterface, largeAttachmentThresholdMB, chunkSizeMB int, bandwidthLimitMBs float64) *FileHandler {
+	var limiter *rate.Limiter
+	if bandwidthLimitMBs > 0 {
+		limit := rate.Limit(bandwidthLimitMBs * 1024 * 1024)
+		limiter = rate.NewLimiter(limit, int(limit)) // Burst equal to the limit
+		log.WithField("limit", limit).Info("Bandwidth limiting enabled.")
+	}
+
 	return &FileHandler{
 		workspacePath:            workspacePath,
 		o365Client:               o365Client,
 		largeAttachmentThreshold: largeAttachmentThresholdMB * 1024 * 1024,
 		chunkSize:                chunkSizeMB * 1024 * 1024,
+		bandwidthLimiter:         limiter,
 	}
 }
 
-// CreateWorkspace creates the unique workspace directory.
+// CreateWorkspace creates the unique workspace directory and verifies it's not a symlink.
 func (fh *FileHandler) CreateWorkspace() error {
 	err := os.MkdirAll(fh.workspacePath, 0755)
 	if err != nil {
 		return &apperrors.FileSystemError{Path: fh.workspacePath, Msg: "failed to create workspace directory", Err: err}
 	}
+
+	// TOCTOU mitigation: After creating, verify it's a directory and not a symlink.
+	info, err := os.Lstat(fh.workspacePath)
+	if err != nil {
+		return &apperrors.FileSystemError{Path: fh.workspacePath, Msg: "failed to stat workspace after creation", Err: err}
+	}
+	if !info.IsDir() {
+		return &apperrors.FileSystemError{Path: fh.workspacePath, Msg: "workspace path is not a directory", Err: nil}
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return &apperrors.FileSystemError{Path: fh.workspacePath, Msg: "for security, workspace cannot be a symbolic link", Err: nil}
+	}
+
 	return nil
 }
 
@@ -52,6 +77,23 @@ func (fh *FileHandler) SaveEmailBody(subject, messageID, bodyContent string) err
 		return &apperrors.FileSystemError{Path: filePath, Msg: "failed to save email body", Err: err}
 	}
 	return nil
+}
+
+// limitedReader is a wrapper around an io.Reader that applies a rate limit.
+type limitedReader struct {
+	reader  io.Reader
+	limiter *rate.Limiter
+	ctx     context.Context
+}
+
+func (lr *limitedReader) Read(p []byte) (n int, err error) {
+	n, err = lr.reader.Read(p)
+	if n > 0 {
+		if err := lr.limiter.WaitN(lr.ctx, n); err != nil {
+			return n, err
+		}
+	}
+	return
 }
 
 // SaveAttachment saves an attachment to a file.
@@ -79,34 +121,32 @@ func (fh *FileHandler) SaveAttachment(ctx context.Context, attachmentName, messa
 
 		resp, err := fh.o365Client.DoRequestWithRetry(req)
 		if err != nil {
-			// Check if the error from DoRequestWithRetry is already a custom error
 			if apiErr, ok := err.(*apperrors.APIError); ok {
-				return apiErr // Return the specific API error
+				return apiErr
 			}
 			if authErr, ok := err.(*apperrors.AuthError); ok {
-				return authErr // Return the specific Auth error
+				return authErr
 			}
-			// Check for context cancellation errors
 			if errors.Is(err, context.Canceled) {
 				return fmt.Errorf("attachment download cancelled by user: %w", err)
 			} else if errors.Is(err, context.DeadlineExceeded) {
 				return fmt.Errorf("attachment download timed out: %w", err)
 			} else {
-				// Otherwise, wrap in a generic error with more context
 				return fmt.Errorf("failed to download attachment from %s: %w", downloadURL, err)
 			}
 		}
-		defer func() {
-			if err := resp.Body.Close(); err != nil {
-				log.Warnf("Error closing response body for small attachment: %v", err)
-			}
-		}()
+		defer resp.Body.Close()
 
 		if resp.StatusCode != http.StatusOK {
 			return &apperrors.APIError{StatusCode: resp.StatusCode, Msg: fmt.Sprintf("failed to download small attachment from %s", downloadURL)}
 		}
 
-		_, err = io.Copy(out, resp.Body)
+		var reader io.Reader = resp.Body
+		if fh.bandwidthLimiter != nil {
+			reader = &limitedReader{reader: resp.Body, limiter: fh.bandwidthLimiter, ctx: ctx}
+		}
+
+		_, err = io.Copy(out, reader)
 		if err != nil {
 			return &apperrors.FileSystemError{Path: filePath, Msg: "failed to write attachment content to file", Err: err}
 		}
@@ -119,9 +159,8 @@ func (fh *FileHandler) SaveAttachment(ctx context.Context, attachmentName, messa
 			select {
 			case <-ctx.Done():
 				log.WithField("error", ctx.Err()).Warn("Context cancelled during large attachment download.")
-				return ctx.Err() // Return context cancellation error
+				return ctx.Err()
 			default:
-				// Continue
 			}
 
 			endByte := downloadedBytes + int64(fh.chunkSize) - 1
@@ -129,7 +168,7 @@ func (fh *FileHandler) SaveAttachment(ctx context.Context, attachmentName, messa
 				endByte = int64(attachmentSize) - 1
 			}
 
-			req, err := http.NewRequestWithContext(ctx, "GET", downloadURL, nil) // Pass ctx to request
+			req, err := http.NewRequestWithContext(ctx, "GET", downloadURL, nil)
 			if err != nil {
 				return fmt.Errorf("failed to create HTTP request for attachment chunk: %w", err)
 			}
@@ -241,9 +280,24 @@ func (fh *FileHandler) LoadState(stateFilePath string) (*o365client.RunState, er
 
 // sanitizeFileName removes invalid characters from a string to be used as a file name.
 func sanitizeFileName(name string) string {
-	// Define a regex to match invalid characters for Windows file names
+	// Replace path traversal sequences
+	sanitized := strings.ReplaceAll(name, "..", "_")
+
+	// Define a regex to match invalid characters for Windows/Unix file names
 	// \ is for backslash, \x00-\x1f are control characters
-	// The other characters are directly included
-	invalidChars := regexp.MustCompile(`[\\/:*?"<>|\x00-\x1f]`) // Corrected escaping for backslash and double quote within regex
-	return invalidChars.ReplaceAllString(name, "_")
+	invalidChars := regexp.MustCompile(`[\\/:*?"<>|\x00-\x1f]`)
+	sanitized = invalidChars.ReplaceAllString(sanitized, "_")
+
+	// Prevent filenames starting with a dash
+	if strings.HasPrefix(sanitized, "-") {
+		sanitized = "_" + sanitized[1:]
+	}
+
+	// Truncate to a reasonable length to avoid filesystem errors
+	const maxLen = 200
+	if len(sanitized) > maxLen {
+		sanitized = sanitized[:maxLen]
+	}
+
+	return sanitized
 }

@@ -81,7 +81,7 @@ func validateWorkspacePath(path string) error {
 func main() {
 	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
 
-	accessToken := flag.String("token", "", "Access token for O356 API")
+	accessToken := flag.String("token", "", "Access token for O356 API (can also be set via O365_ACCESS_TOKEN env var)")
 	mailboxName := flag.String("mailbox", "", "Mailbox name (e.g., name@domain.com)")
 	workspacePath := flag.String("workspace", "", "Unique folder to store all artifacts")
 	timeoutSeconds := flag.Int("timeout", 120, "HTTP client timeout in seconds (default: 120)")
@@ -141,8 +141,15 @@ func main() {
 		cancel()
 	}()
 
+	// Prioritize environment variable for access token for better security
+	tokenFromEnv := os.Getenv("O365_ACCESS_TOKEN")
+	if tokenFromEnv != "" {
+		*accessToken = tokenFromEnv
+		log.Info("Using access token from O365_ACCESS_TOKEN environment variable.")
+	}
+
 	if *accessToken == "" {
-		log.WithField("argument", "accessToken").Fatalf("Error: Access token is missing.")
+		log.WithField("argument", "accessToken").Fatalf("Error: Access token is missing. Provide it via -token flag or O365_ACCESS_TOKEN env var.")
 	}
 	if !isValidEmail(*mailboxName) {
 		log.WithField("argument", "mailboxName").Fatalf("Error: Invalid mailbox name format: %s", *mailboxName)
@@ -164,6 +171,12 @@ func main() {
 	}
 
 	runDownloadMode(ctx, cfg, *accessToken, *mailboxName, *workspacePath, *processingMode, *stateFilePath, rng)
+}
+
+type AttachmentJob struct {
+	Attachment  o365client.Attachment
+	MessageID   string
+	AccessToken string
 }
 
 type RunStats struct {
@@ -196,7 +209,7 @@ func runDownloadMode(ctx context.Context, cfg *Config, accessToken, mailboxName,
 
 	o365Client := o365client.NewO365Client(accessToken, time.Duration(cfg.HTTPClientTimeoutSeconds)*time.Second, cfg.MaxRetries, cfg.InitialBackoffSeconds, cfg.APICallsPerSecond, cfg.APIBurst, rng)
 	emailProcessor := emailprocessor.NewEmailProcessor()
-	fileHandler := filehandler.NewFileHandler(workspacePath, o365Client, cfg.LargeAttachmentThresholdMB, cfg.ChunkSizeMB)
+	fileHandler := filehandler.NewFileHandler(workspacePath, o365Client, cfg.LargeAttachmentThresholdMB, cfg.ChunkSizeMB, cfg.BandwidthLimitMBs)
 
 	if err := fileHandler.CreateWorkspace(); err != nil {
 		log.Fatalf("Error creating workspace: %v", err)
@@ -223,108 +236,122 @@ func runDownloadMode(ctx context.Context, cfg *Config, accessToken, mailboxName,
 		state = &o365client.RunState{}
 	}
 
-	messages, err := o365Client.GetMessages(ctx, mailboxName, state)
-	if err != nil {
-		log.Fatalf("O365 API error fetching messages: %v", err)
-	}
-	log.WithField("count", len(messages)).Infof("Fetched messages.")
-
-	var messagesToProcess []o365client.Message
-	if processingMode == "incremental" && state.LastMessageID != "" && len(messages) > 0 && messages[0].ID == state.LastMessageID {
-		messagesToProcess = messages[1:]
-		log.WithField("messageID", state.LastMessageID).Debug("Skipping first message as it was the last one processed in the previous run.")
-	} else {
-		messagesToProcess = messages
-	}
-
-	if len(messagesToProcess) == 0 {
-		log.Info("No new messages to process.")
-		return
-	}
-
 	var newLatestMessage o365client.Message
 	var mu sync.Mutex
-	var wg sync.WaitGroup
+
+	messagesChan := make(chan o365client.Message, cfg.MaxParallelDownloads*2)
+	attachmentsChan := make(chan AttachmentJob, cfg.MaxParallelDownloads*4)
+
+	var producerWg, processorWg, downloaderWg sync.WaitGroup
+
+	// Shared semaphore for all API-bound workers
 	semaphore := make(chan struct{}, cfg.MaxParallelDownloads)
 
-	for _, msg := range messagesToProcess {
-		wg.Add(1)
-		semaphore <- struct{}{}
-		go func(msg o365client.Message) {
-			defer wg.Done()
-			defer func() { <-semaphore }()
+	// --- Producer ---
+	producerWg.Add(1)
+	go func() {
+		defer producerWg.Done()
+		err := o365Client.GetMessages(ctx, mailboxName, state, messagesChan)
+		if err != nil {
+			log.Fatalf("O365 API error fetching messages: %v", err)
+		}
+	}()
 
-			atomic.AddUint32(&stats.messagesProcessed, 1)
-			log.WithFields(log.Fields{"messageID": msg.ID, "subject": msg.Subject}).Infof("Processing message.")
+	// --- Message Processors ---
+	for i := 0; i < cfg.MaxParallelDownloads; i++ {
+		processorWg.Add(1)
+		go func() {
+			defer processorWg.Done()
+			for msg := range messagesChan {
+				semaphore <- struct{}{}
+				atomic.AddUint32(&stats.messagesProcessed, 1)
+				log.WithFields(log.Fields{"messageID": msg.ID, "subject": msg.Subject}).Infof("Processing message.")
 
-			cleanedBody, err := emailProcessor.CleanHTML(msg.Body.Content)
-			if err != nil {
-				atomic.AddUint32(&stats.nonFatalErrors, 1)
-				log.WithFields(log.Fields{"messageID": msg.ID, "error": err}).Warn("Failed to clean HTML for message.")
-				cleanedBody = msg.Body.Content
-			}
-			if err := fileHandler.SaveEmailBody(msg.Subject, msg.ID, cleanedBody); err != nil {
-				atomic.AddUint32(&stats.nonFatalErrors, 1)
-				log.WithFields(log.Fields{"messageID": msg.ID, "error": err}).Errorf("Error saving email body.")
-			}
-
-			if msg.HasAttachments {
-				attachments, err := o365Client.GetAttachments(ctx, mailboxName, msg.ID)
+				cleanedBody, err := emailProcessor.CleanHTML(msg.Body.Content)
 				if err != nil {
 					atomic.AddUint32(&stats.nonFatalErrors, 1)
-					log.WithFields(log.Fields{"messageID": msg.ID, "error": err}).Errorf("O365 API error fetching attachments.")
-					return
+					log.WithFields(log.Fields{"messageID": msg.ID, "error": err}).Warn("Failed to clean HTML for message.")
+					cleanedBody = msg.Body.Content
 				}
-				log.WithFields(log.Fields{"count": len(attachments), "messageID": msg.ID}).Infof("Found attachments.")
-
-				var attWg sync.WaitGroup
-				for _, att := range attachments {
-					attWg.Add(1)
-					go func(att o365client.Attachment) {
-						defer attWg.Done()
-						detailedAtt, err := o365Client.GetAttachmentDetails(ctx, mailboxName, msg.ID, att.ID)
-						if err != nil {
-							atomic.AddUint32(&stats.nonFatalErrors, 1)
-							log.WithFields(log.Fields{"attachmentName": att.Name, "messageID": msg.ID, "error": err}).Error("Failed to get attachment details.")
-							return
-						}
-
-						log.WithFields(log.Fields{
-							"attachmentName":  detailedAtt.Name,
-							"messageID":       msg.ID,
-							"attachmentType":  detailedAtt.ODataType,
-							"hasDownloadURL":  detailedAtt.DownloadURL != "",
-							"hasContentBytes": detailedAtt.ContentBytes != "",
-						}).Debug("Processing attachment.")
-
-						if detailedAtt.DownloadURL != "" {
-							err = fileHandler.SaveAttachment(ctx, detailedAtt.Name, msg.ID, detailedAtt.DownloadURL, accessToken, detailedAtt.Size)
-						} else if detailedAtt.ContentBytes != "" {
-							err = fileHandler.SaveAttachmentFromBytes(detailedAtt.Name, msg.ID, detailedAtt.ContentBytes)
-						} else {
-							atomic.AddUint32(&stats.nonFatalErrors, 1)
-							log.WithFields(log.Fields{"attachmentName": detailedAtt.Name, "messageID": msg.ID}).Warn("Skipping attachment: No download URL or content bytes.")
-							return
-						}
-						if err != nil {
-							atomic.AddUint32(&stats.nonFatalErrors, 1)
-							log.WithFields(log.Fields{"attachmentName": att.Name, "messageID": msg.ID, "error": err}).Error("Failed to save attachment.")
-						} else {
-							atomic.AddUint32(&stats.attachmentsProcessed, 1)
-						}
-					}(att)
+				if err := fileHandler.SaveEmailBody(msg.Subject, msg.ID, cleanedBody); err != nil {
+					atomic.AddUint32(&stats.nonFatalErrors, 1)
+					log.WithFields(log.Fields{"messageID": msg.ID, "error": err}).Errorf("Error saving email body.")
 				}
-				attWg.Wait()
-			}
 
-			mu.Lock()
-			if msg.ReceivedDateTime.After(newLatestMessage.ReceivedDateTime) || newLatestMessage.ID == "" {
-				newLatestMessage = msg
+				if msg.HasAttachments {
+					log.WithFields(log.Fields{"count": len(msg.Attachments), "messageID": msg.ID}).Infof("Found attachments.")
+					for _, att := range msg.Attachments {
+						attachmentsChan <- AttachmentJob{
+							Attachment:  att,
+							MessageID:   msg.ID,
+							AccessToken: accessToken,
+						}
+					}
+				}
+
+				mu.Lock()
+				if msg.ReceivedDateTime.After(newLatestMessage.ReceivedDateTime) || newLatestMessage.ID == "" {
+					newLatestMessage = msg
+				}
+				// Periodically save state
+				processedCount := atomic.LoadUint32(&stats.messagesProcessed)
+				if processedCount%uint32(cfg.StateSaveInterval) == 0 {
+					log.WithField("messageCount", processedCount).Info("Periodically saving state.")
+					if err := fileHandler.SaveState(&o365client.RunState{LastRunTimestamp: newLatestMessage.ReceivedDateTime, LastMessageID: newLatestMessage.ID}, stateFilePath); err != nil {
+						log.WithField("error", err).Error("Failed to periodically save state.")
+					}
+				}
+				mu.Unlock()
+				<-semaphore
 			}
-			mu.Unlock()
-		}(msg)
+		}()
 	}
-	wg.Wait()
+
+	// --- Attachment Downloaders ---
+	for i := 0; i < cfg.MaxParallelDownloads; i++ {
+		downloaderWg.Add(1)
+		go func() {
+			defer downloaderWg.Done()
+			for job := range attachmentsChan {
+				semaphore <- struct{}{}
+				log.WithFields(log.Fields{
+					"attachmentName": job.Attachment.Name,
+					"messageID":      job.MessageID,
+				}).Debug("Processing attachment.")
+
+				var err error
+				if job.Attachment.DownloadURL != "" {
+					err = fileHandler.SaveAttachment(ctx, job.Attachment.Name, job.MessageID, job.Attachment.DownloadURL, job.AccessToken, job.Attachment.Size)
+				} else if job.Attachment.ContentBytes != "" {
+					err = fileHandler.SaveAttachmentFromBytes(job.Attachment.Name, job.MessageID, job.Attachment.ContentBytes)
+				} else {
+					atomic.AddUint32(&stats.nonFatalErrors, 1)
+					log.WithFields(log.Fields{"attachmentName": job.Attachment.Name, "messageID": job.MessageID}).Warn("Skipping attachment: No download URL or content bytes.")
+					<-semaphore
+					continue
+				}
+
+				if err != nil {
+					atomic.AddUint32(&stats.nonFatalErrors, 1)
+					log.WithFields(log.Fields{"attachmentName": job.Attachment.Name, "messageID": job.MessageID, "error": err}).Error("Failed to save attachment.")
+				} else {
+					atomic.AddUint32(&stats.attachmentsProcessed, 1)
+				}
+				<-semaphore
+			}
+		}()
+	}
+
+	// Wait for producer to finish, then close message channel
+	producerWg.Wait()
+	close(messagesChan)
+
+	// Wait for processors to finish, then close attachment channel
+	processorWg.Wait()
+	close(attachmentsChan)
+
+	// Wait for downloaders to finish
+	downloaderWg.Wait()
 
 	if processingMode == "incremental" && newLatestMessage.ID != "" {
 		newState := &o365client.RunState{
