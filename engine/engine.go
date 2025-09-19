@@ -257,13 +257,11 @@ func runDownloadMode(ctx context.Context, cfg *Config, o365Client o365client.O36
 
 					if isLastAttachment {
 						log.WithField("messageID", job.MessageID).Info("All attachments for message downloaded, writing final metadata.")
-						err := fileHandler.WriteAttachmentsToMetadata(job.MsgPath, state.Attachments)
-						if err != nil {
+						metaErr := fileHandler.WriteAttachmentsToMetadata(job.MsgPath, state.Attachments)
+						if metaErr != nil {
 							atomic.AddUint32(&stats.NonFatalErrors, 1)
-							log.WithFields(log.Fields{"messageID": job.MessageID, "error": err}).Error("Failed to write final metadata.")
-							if cfg.ProcessingMode == "route" {
-								resultsChan <- ProcessingResult{MessageID: job.MessageID, Err: err}
-							}
+							log.WithFields(log.Fields{"messageID": job.MessageID, "error": metaErr}).Error("Failed to write final metadata.")
+							err = metaErr // The metadata error takes precedence for the final report.
 						}
 						// Clean up state for the message
 						delete(messageStates, job.MessageID)
