@@ -20,6 +20,11 @@ func (ep *EmailProcessor) IsHTML(content string) bool {
 	return htmlTagRegex.MatchString(content)
 }
 
+type EmailProcessorInterface interface {
+	ProcessBody(htmlContent, convertBody, chromiumPath string) (interface{}, error)
+	IsHTML(content string) bool
+}
+
 type EmailProcessor struct{}
 
 func NewEmailProcessor() *EmailProcessor {

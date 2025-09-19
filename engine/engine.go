@@ -44,7 +44,14 @@ type MessageState struct {
 	HasFailed      bool
 }
 
-func RunEngine(ctx context.Context, cfg *Config, o365Client o365client.O365ClientInterface, emailProcessor *emailprocessor.EmailProcessor, fileHandler *filehandler.FileHandler, accessToken, mailboxName, workspacePath, version string) {
+type DownloadState struct {
+	ExpectedAttachments int
+	CompletedAttachments int
+	Attachments          []filehandler.AttachmentMetadata
+	Mu                   sync.Mutex
+}
+
+func RunEngine(ctx context.Context, cfg *Config, o365Client o365client.O365ClientInterface, emailProcessor emailprocessor.EmailProcessorInterface, fileHandler filehandler.FileHandlerInterface, accessToken, mailboxName, workspacePath, version string) {
 	stats := &RunStats{}
 	startTime := time.Now()
 
@@ -74,7 +81,7 @@ func RunEngine(ctx context.Context, cfg *Config, o365Client o365client.O365Clien
 	runDownloadMode(ctx, cfg, o365Client, emailProcessor, fileHandler, accessToken, mailboxName, stats)
 }
 
-func runDownloadMode(ctx context.Context, cfg *Config, o365Client o365client.O365ClientInterface, emailProcessor *emailprocessor.EmailProcessor, fileHandler *filehandler.FileHandler, accessToken, mailboxName string, stats *RunStats) {
+func runDownloadMode(ctx context.Context, cfg *Config, o365Client o365client.O365ClientInterface, emailProcessor emailprocessor.EmailProcessorInterface, fileHandler filehandler.FileHandlerInterface, accessToken, mailboxName string, stats *RunStats) {
 	var state *o365client.RunState
 	var err error
 	if cfg.ProcessingMode == "incremental" {
@@ -98,6 +105,7 @@ func runDownloadMode(ctx context.Context, cfg *Config, o365Client o365client.O36
 	var newLatestMessage o365client.Message
 	var mu sync.Mutex
 
+	messageStates := make(map[string]*DownloadState)
 	messagesChan := make(chan o365client.Message, cfg.MaxParallelDownloads*2)
 	attachmentsChan := make(chan AttachmentJob, cfg.MaxParallelDownloads*4)
 	resultsChan := make(chan ProcessingResult, cfg.MaxParallelDownloads*4)
@@ -168,6 +176,10 @@ func runDownloadMode(ctx context.Context, cfg *Config, o365Client o365client.O36
 
 				if msg.HasAttachments {
 					log.WithFields(log.Fields{"count": len(msg.Attachments), "messageID": msg.ID}).Infof("Found attachments.")
+					messageStates[msg.ID] = &DownloadState{
+						ExpectedAttachments: len(msg.Attachments),
+						Attachments:         make([]filehandler.AttachmentMetadata, 0, len(msg.Attachments)),
+					}
 					for i, att := range msg.Attachments {
 						attachmentsChan <- AttachmentJob{
 							Attachment:  att,
@@ -207,11 +219,13 @@ func runDownloadMode(ctx context.Context, cfg *Config, o365Client o365client.O36
 					"messageID":      job.MessageID,
 				}).Debug("Processing attachment.")
 
+				var attMetadata *filehandler.AttachmentMetadata
 				var err error
+
 				if job.Attachment.DownloadURL != "" {
-					err = fileHandler.SaveAttachment(ctx, job.MsgPath, job.Attachment, job.AccessToken, job.Sequence)
+					attMetadata, err = fileHandler.SaveAttachment(ctx, job.MsgPath, job.Attachment, job.AccessToken, job.Sequence)
 				} else if job.Attachment.ContentBytes != "" {
-					err = fileHandler.SaveAttachmentFromBytes(job.MsgPath, job.Attachment, job.Sequence)
+					attMetadata, err = fileHandler.SaveAttachmentFromBytes(job.MsgPath, job.Attachment, job.Sequence)
 				} else {
 					err = fmt.Errorf("no download URL or content bytes")
 					log.WithFields(log.Fields{"attachmentName": job.Attachment.Name, "messageID": job.MessageID}).Warn("Skipping attachment.")
@@ -222,6 +236,19 @@ func runDownloadMode(ctx context.Context, cfg *Config, o365Client o365client.O36
 					log.WithFields(log.Fields{"attachmentName": job.Attachment.Name, "messageID": job.MessageID, "error": err}).Error("Failed to save attachment.")
 				} else {
 					atomic.AddUint32(&stats.AttachmentsProcessed, 1)
+					// Finalize metadata if this is the last attachment
+					state := messageStates[job.MessageID]
+					state.Mu.Lock()
+					state.CompletedAttachments++
+					state.Attachments = append(state.Attachments, *attMetadata)
+					if state.CompletedAttachments == state.ExpectedAttachments {
+						log.WithField("messageID", job.MessageID).Info("All attachments for message downloaded, writing final metadata.")
+						if err := fileHandler.WriteAttachmentsToMetadata(job.MsgPath, state.Attachments); err != nil {
+							atomic.AddUint32(&stats.NonFatalErrors, 1)
+							log.WithFields(log.Fields{"messageID": job.MessageID, "error": err}).Error("Failed to write final metadata.")
+						}
+					}
+					state.Mu.Unlock()
 				}
 
 				if cfg.ProcessingMode == "route" {
