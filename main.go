@@ -94,6 +94,8 @@ func main() {
 	configPath := flag.String("config", "", "Path to the configuration file (JSON)")
 	apiCallsPerSecond := flag.Float64("api-rate", 0, "API calls per second for client-side rate limiting (default: 5.0)")
 	apiBurst := flag.Int("api-burst", 0, "API burst capacity for client-side rate limiting (default: 10)")
+	maxRetries := flag.Int("max-retries", 2, "Maximum number of retries for failed API calls.")
+	initialBackoffSeconds := flag.Int("initial-backoff-seconds", 5, "Initial backoff in seconds for retries.")
 	displayVersion := flag.Bool("version", false, "Display application version")
 	healthCheck := flag.Bool("healthcheck", false, "Perform a health check on the mailbox and exit")
 	debug := flag.Bool("debug", false, "Enable debug logging")
@@ -130,6 +132,12 @@ func main() {
 	}
 	if *apiBurst != 0 {
 		cfg.APIBurst = *apiBurst
+	}
+	if *maxRetries != 2 {
+		cfg.MaxRetries = *maxRetries
+	}
+	if *initialBackoffSeconds != 5 {
+		cfg.InitialBackoffSeconds = *initialBackoffSeconds
 	}
 
 	if err := cfg.Validate(); err != nil {

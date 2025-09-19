@@ -27,10 +27,10 @@ func (c *Config) SetDefaults() {
 		c.HTTPClientTimeoutSeconds = 120
 	}
 	if c.MaxRetries == 0 {
-		c.MaxRetries = 5
+		c.MaxRetries = 2
 	}
 	if c.InitialBackoffSeconds == 0 {
-		c.InitialBackoffSeconds = 1
+		c.InitialBackoffSeconds = 5
 	}
 	if c.LargeAttachmentThresholdMB == 0 {
 		c.LargeAttachmentThresholdMB = 20
