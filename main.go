@@ -64,7 +64,11 @@ func validateWorkspacePath(path string) error {
 	if err != nil {
 		return fmt.Errorf("failed to open workspace directory for checking emptiness: %w", err)
 	}
-	defer dir.Close()
+	defer func() {
+		if err := dir.Close(); err != nil {
+			log.Warnf("Failed to close workspace directory handle: %v", err)
+		}
+	}()
 
 	_, err = dir.Readdir(1) // Try to read one entry
 	if err == nil {

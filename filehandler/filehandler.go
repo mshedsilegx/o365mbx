@@ -134,7 +134,11 @@ func (fh *FileHandler) SaveAttachment(ctx context.Context, attachmentName, messa
 				return fmt.Errorf("failed to download attachment from %s: %w", downloadURL, err)
 			}
 		}
-		defer resp.Body.Close()
+		defer func() {
+			if err := resp.Body.Close(); err != nil {
+				log.Warnf("Error closing response body for small attachment: %v", err)
+			}
+		}()
 
 		if resp.StatusCode != http.StatusOK {
 			return &apperrors.APIError{StatusCode: resp.StatusCode, Msg: fmt.Sprintf("failed to download small attachment from %s", downloadURL)}

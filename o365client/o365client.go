@@ -210,7 +210,9 @@ func (c *O365Client) GetOrCreateFolderIDByName(ctx context.Context, mailboxName,
 
 	if resp.StatusCode == http.StatusOK {
 		body, err := io.ReadAll(resp.Body)
-		resp.Body.Close()
+		if err := resp.Body.Close(); err != nil {
+			log.Warnf("Failed to close response body for folder check: %v", err)
+		}
 		if err != nil {
 			return "", fmt.Errorf("failed to read response body for folder: %w", err)
 		}
@@ -227,7 +229,9 @@ func (c *O365Client) GetOrCreateFolderIDByName(ctx context.Context, mailboxName,
 			return folderResponse.Value[0].ID, nil
 		}
 	} else {
-		resp.Body.Close()
+		if err := resp.Body.Close(); err != nil {
+			log.Warnf("Failed to close error response body for folder check: %v", err)
+		}
 	}
 
 	// If not found, create it
@@ -254,7 +258,11 @@ func (c *O365Client) createFolder(ctx context.Context, mailboxName, folderName s
 	if err != nil {
 		return "", fmt.Errorf("failed to create folder: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			log.Warnf("Failed to close response body for create folder: %v", err)
+		}
+	}()
 
 	if resp.StatusCode != http.StatusCreated {
 		errorBody, _ := io.ReadAll(resp.Body)
@@ -366,7 +374,11 @@ func (c *O365Client) MoveMessage(ctx context.Context, mailboxName, messageID, de
 	if err != nil {
 		return fmt.Errorf("failed to move message %s: %w", messageID, err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			log.Warnf("Failed to close response body for move message: %v", err)
+		}
+	}()
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
 		errorBody, _ := io.ReadAll(resp.Body)
