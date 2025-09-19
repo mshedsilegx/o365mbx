@@ -21,6 +21,8 @@ type AttachmentJob struct {
 	Attachment  o365client.Attachment
 	MessageID   string
 	AccessToken string
+	MsgPath     string
+	Sequence    int
 }
 
 type RunStats struct {
@@ -145,9 +147,10 @@ func runDownloadMode(ctx context.Context, cfg *Config, o365Client o365client.O36
 					processingErr = err
 				}
 
-				if err := fileHandler.SaveEmailBody(msg.Subject, msg.ID, processedBody, cfg.ConvertBody); err != nil {
+				msgPath, err := fileHandler.SaveMessage(&msg, processedBody, cfg.ConvertBody)
+				if err != nil {
 					atomic.AddUint32(&stats.NonFatalErrors, 1)
-					log.WithFields(log.Fields{"messageID": msg.ID, "error": err}).Errorf("Error saving email body.")
+					log.WithFields(log.Fields{"messageID": msg.ID, "error": err}).Errorf("Error saving email message.")
 					if processingErr == nil {
 						processingErr = err
 					}
@@ -165,11 +168,13 @@ func runDownloadMode(ctx context.Context, cfg *Config, o365Client o365client.O36
 
 				if msg.HasAttachments {
 					log.WithFields(log.Fields{"count": len(msg.Attachments), "messageID": msg.ID}).Infof("Found attachments.")
-					for _, att := range msg.Attachments {
+					for i, att := range msg.Attachments {
 						attachmentsChan <- AttachmentJob{
 							Attachment:  att,
 							MessageID:   msg.ID,
 							AccessToken: accessToken,
+							MsgPath:     msgPath,
+							Sequence:    i + 1,
 						}
 					}
 				}
@@ -204,9 +209,9 @@ func runDownloadMode(ctx context.Context, cfg *Config, o365Client o365client.O36
 
 				var err error
 				if job.Attachment.DownloadURL != "" {
-					err = fileHandler.SaveAttachment(ctx, job.Attachment.Name, job.MessageID, job.Attachment.DownloadURL, job.AccessToken, job.Attachment.Size)
+					err = fileHandler.SaveAttachment(ctx, job.MsgPath, job.Attachment, job.AccessToken, job.Sequence)
 				} else if job.Attachment.ContentBytes != "" {
-					err = fileHandler.SaveAttachmentFromBytes(job.Attachment.Name, job.MessageID, job.Attachment.ContentBytes)
+					err = fileHandler.SaveAttachmentFromBytes(job.MsgPath, job.Attachment, job.Sequence)
 				} else {
 					err = fmt.Errorf("no download URL or content bytes")
 					log.WithFields(log.Fields{"attachmentName": job.Attachment.Name, "messageID": job.MessageID}).Warn("Skipping attachment.")
