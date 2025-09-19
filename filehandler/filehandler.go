@@ -155,20 +155,24 @@ func (fh *FileHandler) SaveAttachment(ctx context.Context, attachmentName, messa
 					return fmt.Errorf("failed to download attachment chunk from %s (range %d-%d): %w", downloadURL, downloadedBytes, endByte, err)
 				}
 			}
-			defer func() {
-				if err := resp.Body.Close(); err != nil {
-					log.Warnf("Error closing response body for large attachment chunk: %v", err)
-				}
-			}() // Defer inside the loop, will be closed on each iteration
 
 			// Graph API returns 206 Partial Content for range requests, 200 OK if range is ignored or full file.
 			if resp.StatusCode != http.StatusPartialContent && resp.StatusCode != http.StatusOK {
+				if err := resp.Body.Close(); err != nil {
+					log.Warnf("Error closing response body for failed large attachment chunk: %v", err)
+				}
 				return &apperrors.APIError{StatusCode: resp.StatusCode, Msg: fmt.Sprintf("failed to download attachment chunk from %s (range %d-%d)", downloadURL, downloadedBytes, endByte)}
 			}
 
 			n, err := io.Copy(out, resp.Body)
 			if err != nil {
+				if err := resp.Body.Close(); err != nil {
+					log.Warnf("Error closing response body after partial write for large attachment chunk: %v", err)
+				}
 				return &apperrors.FileSystemError{Path: filePath, Msg: "failed to write attachment chunk content to file", Err: err}
+			}
+			if err := resp.Body.Close(); err != nil {
+				log.Warnf("Error closing response body for large attachment chunk: %v", err)
 			}
 			downloadedBytes += n
 			log.WithFields(log.Fields{"downloadedBytes": n, "attachmentName": attachmentName, "totalDownloaded": downloadedBytes, "attachmentSize": attachmentSize}).Debug("Downloaded bytes for attachment.")
@@ -179,19 +183,25 @@ func (fh *FileHandler) SaveAttachment(ctx context.Context, attachmentName, messa
 	return nil
 }
 
-// SaveAttachmentFromBytes saves an attachment from its base64 encoded content.
+// SaveAttachmentFromBytes saves an attachment from its base64 encoded content using a streaming approach.
 func (fh *FileHandler) SaveAttachmentFromBytes(attachmentName, messageID, contentBytes string) error {
 	fileName := fmt.Sprintf("%s_%s_%s", sanitizeFileName(attachmentName), messageID, attachmentName)
 	filePath := filepath.Join(fh.workspacePath, fileName)
 
-	decodedBytes, err := base64.StdEncoding.DecodeString(contentBytes)
+	out, err := os.Create(filePath)
 	if err != nil {
-		return fmt.Errorf("failed to decode base64 content for attachment %s: %w", attachmentName, err)
+		return &apperrors.FileSystemError{Path: filePath, Msg: "failed to create file for attachment from bytes", Err: err}
 	}
+	defer func() {
+		if err := out.Close(); err != nil {
+			log.Warnf("Error closing file %s: %v", filePath, err)
+		}
+	}()
 
-	err = os.WriteFile(filePath, decodedBytes, 0644)
+	decoder := base64.NewDecoder(base64.StdEncoding, strings.NewReader(contentBytes))
+	_, err = io.Copy(out, decoder)
 	if err != nil {
-		return &apperrors.FileSystemError{Path: filePath, Msg: "failed to save attachment from bytes", Err: err}
+		return fmt.Errorf("failed to decode and save base64 content for attachment %s: %w", attachmentName, err)
 	}
 
 	log.WithField("attachmentName", attachmentName).Infof("Successfully saved attachment from contentBytes.")

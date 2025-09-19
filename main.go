@@ -4,12 +4,14 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io"
 	"math/rand"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"regexp"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -34,16 +36,45 @@ func validateWorkspacePath(path string) error {
 	if !filepath.IsAbs(path) {
 		return fmt.Errorf("workspace path must be an absolute path: %s", path)
 	}
-	if err := os.MkdirAll(path, 0755); err != nil {
-		return fmt.Errorf("failed to create workspace directory %s: %w", path, err)
+
+	// Security check for critical system directories
+	criticalPaths := []string{"/", "/root", "/etc", "/bin", "/sbin", "/usr", "/var"}
+	for _, p := range criticalPaths {
+		if path == p {
+			return fmt.Errorf("for safety, using critical system directory '%s' as a workspace is not allowed", path)
+		}
 	}
+
 	info, err := os.Stat(path)
 	if err != nil {
+		if os.IsNotExist(err) {
+			// Path doesn't exist, which is fine. We will create it.
+			return nil
+		}
 		return fmt.Errorf("failed to stat workspace directory %s: %w", path, err)
 	}
+
 	if !info.IsDir() {
-		return fmt.Errorf("workspace path %s is not a directory", path)
+		return fmt.Errorf("workspace path %s exists but is not a directory", path)
 	}
+
+	// Check if the directory is empty
+	dir, err := os.Open(path)
+	if err != nil {
+		return fmt.Errorf("failed to open workspace directory for checking emptiness: %w", err)
+	}
+	defer dir.Close()
+
+	_, err = dir.Readdir(1) // Try to read one entry
+	if err == nil {
+		// If we successfully read an entry, the directory is not empty.
+		log.Warnf("Workspace directory %s is not empty. Files may be overwritten.", path)
+	} else if err != io.EOF {
+		// An error other than EOF occurred
+		return fmt.Errorf("failed to check if workspace directory is empty: %w", err)
+	}
+	// If err is io.EOF, the directory is empty, which is good.
+
 	return nil
 }
 
@@ -135,7 +166,26 @@ func main() {
 	runDownloadMode(ctx, cfg, *accessToken, *mailboxName, *workspacePath, *processingMode, *stateFilePath, rng)
 }
 
+type RunStats struct {
+	messagesProcessed    uint32
+	attachmentsProcessed uint32
+	nonFatalErrors       uint32
+}
+
 func runDownloadMode(ctx context.Context, cfg *Config, accessToken, mailboxName, workspacePath, processingMode, stateFilePath string, rng *rand.Rand) {
+	stats := &RunStats{}
+	startTime := time.Now()
+
+	defer func() {
+		log.Info("Application finished.")
+		fmt.Println("\n--- Run Summary ---")
+		fmt.Printf("Total execution time: %s\n", time.Since(startTime).Round(time.Second))
+		fmt.Printf("Messages processed: %d\n", atomic.LoadUint32(&stats.messagesProcessed))
+		fmt.Printf("Attachments downloaded: %d\n", atomic.LoadUint32(&stats.attachmentsProcessed))
+		fmt.Printf("Non-fatal errors: %d\n", atomic.LoadUint32(&stats.nonFatalErrors))
+		fmt.Println("-----------------")
+	}()
+
 	if err := validateWorkspacePath(workspacePath); err != nil {
 		log.Fatalf("Error validating workspace path: %v", err)
 	}
@@ -189,7 +239,6 @@ func runDownloadMode(ctx context.Context, cfg *Config, accessToken, mailboxName,
 
 	if len(messagesToProcess) == 0 {
 		log.Info("No new messages to process.")
-		log.Info("Application finished.")
 		return
 	}
 
@@ -205,20 +254,24 @@ func runDownloadMode(ctx context.Context, cfg *Config, accessToken, mailboxName,
 			defer wg.Done()
 			defer func() { <-semaphore }()
 
+			atomic.AddUint32(&stats.messagesProcessed, 1)
 			log.WithFields(log.Fields{"messageID": msg.ID, "subject": msg.Subject}).Infof("Processing message.")
 
 			cleanedBody, err := emailProcessor.CleanHTML(msg.Body.Content)
 			if err != nil {
+				atomic.AddUint32(&stats.nonFatalErrors, 1)
 				log.WithFields(log.Fields{"messageID": msg.ID, "error": err}).Warn("Failed to clean HTML for message.")
 				cleanedBody = msg.Body.Content
 			}
 			if err := fileHandler.SaveEmailBody(msg.Subject, msg.ID, cleanedBody); err != nil {
+				atomic.AddUint32(&stats.nonFatalErrors, 1)
 				log.WithFields(log.Fields{"messageID": msg.ID, "error": err}).Errorf("Error saving email body.")
 			}
 
 			if msg.HasAttachments {
 				attachments, err := o365Client.GetAttachments(ctx, mailboxName, msg.ID)
 				if err != nil {
+					atomic.AddUint32(&stats.nonFatalErrors, 1)
 					log.WithFields(log.Fields{"messageID": msg.ID, "error": err}).Errorf("O365 API error fetching attachments.")
 					return
 				}
@@ -231,6 +284,7 @@ func runDownloadMode(ctx context.Context, cfg *Config, accessToken, mailboxName,
 						defer attWg.Done()
 						detailedAtt, err := o365Client.GetAttachmentDetails(ctx, mailboxName, msg.ID, att.ID)
 						if err != nil {
+							atomic.AddUint32(&stats.nonFatalErrors, 1)
 							log.WithFields(log.Fields{"attachmentName": att.Name, "messageID": msg.ID, "error": err}).Error("Failed to get attachment details.")
 							return
 						}
@@ -248,11 +302,15 @@ func runDownloadMode(ctx context.Context, cfg *Config, accessToken, mailboxName,
 						} else if detailedAtt.ContentBytes != "" {
 							err = fileHandler.SaveAttachmentFromBytes(detailedAtt.Name, msg.ID, detailedAtt.ContentBytes)
 						} else {
+							atomic.AddUint32(&stats.nonFatalErrors, 1)
 							log.WithFields(log.Fields{"attachmentName": detailedAtt.Name, "messageID": msg.ID}).Warn("Skipping attachment: No download URL or content bytes.")
 							return
 						}
 						if err != nil {
+							atomic.AddUint32(&stats.nonFatalErrors, 1)
 							log.WithFields(log.Fields{"attachmentName": att.Name, "messageID": msg.ID, "error": err}).Error("Failed to save attachment.")
+						} else {
+							atomic.AddUint32(&stats.attachmentsProcessed, 1)
 						}
 					}(att)
 				}
@@ -281,8 +339,6 @@ func runDownloadMode(ctx context.Context, cfg *Config, accessToken, mailboxName,
 			log.Errorf("Error saving state file: %v", err)
 		}
 	}
-
-	log.Info("Application finished.")
 }
 
 func runHealthCheckMode(ctx context.Context, client *o365client.O365Client, mailboxName string) {

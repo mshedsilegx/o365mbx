@@ -41,22 +41,27 @@ func (ep *EmailProcessor) CleanHTML(htmlContent string) (string, error) {
 				}
 			}
 			// Extract link text
-			linkTextBuilder := strings.Builder{}
-			var extractLinkText func(*html.Node)
-			extractLinkText = func(node *html.Node) {
+			var linkTextBuilder strings.Builder
+			var extractText func(*html.Node)
+			extractText = func(node *html.Node) {
 				if node.Type == html.TextNode {
 					linkTextBuilder.WriteString(node.Data)
 				}
 				for c := node.FirstChild; c != nil; c = c.NextSibling {
-					extractLinkText(c)
+					extractText(c)
 				}
 			}
-			extractLinkText(n)
+			extractText(n)
 			linkText := strings.TrimSpace(linkTextBuilder.String())
+
+			// If link text is empty, try to use the href as the text
+			if linkText == "" {
+				linkText = href
+			}
 
 			if linkText != "" && href != "" {
 				sb.WriteString(fmt.Sprintf(" [%s](%s) ", linkText, href))
-			} else if href != "" {
+			} else if href != "" { // Should be rare due to the fallback above
 				sb.WriteString(fmt.Sprintf(" %s ", href))
 			}
 			return // Skip processing children as we've handled the link

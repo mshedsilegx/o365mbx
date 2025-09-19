@@ -139,14 +139,9 @@ func (c *O365Client) GetMessages(ctx context.Context, mailboxName string, state 
 		if err != nil {
 			return nil, fmt.Errorf("failed to fetch messages: %w", err)
 		}
-		defer func() {
-			if err := resp.Body.Close(); err != nil {
-				log.Warnf("Error closing response body in GetMessages: %v", err)
-			}
-		}()
 
 		if resp.StatusCode != http.StatusOK {
-			errorBody, _ := io.ReadAll(resp.Body) // Read body for detailed error
+			errorBody, _ := io.ReadAll(resp.Body)
 			if err := resp.Body.Close(); err != nil {
 				log.Warnf("Error closing response body after reading error: %v", err)
 			}
@@ -158,7 +153,13 @@ func (c *O365Client) GetMessages(ctx context.Context, mailboxName string, state 
 
 		body, err := io.ReadAll(resp.Body)
 		if err != nil {
-			return nil, fmt.Errorf("failed to read response body for attachments: %w", err)
+			if err := resp.Body.Close(); err != nil {
+				log.Warnf("Error closing response body after read failure: %v", err)
+			}
+			return nil, fmt.Errorf("failed to read response body for messages: %w", err)
+		}
+		if err := resp.Body.Close(); err != nil {
+			log.Warnf("Error closing response body in GetMessages: %v", err)
 		}
 
 		var response struct {
