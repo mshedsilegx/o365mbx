@@ -167,7 +167,7 @@ func main() {
 	// --- Dependency Injection ---
 	o365Client := o365client.NewO365Client(accessToken, time.Duration(cfg.HTTPClientTimeoutSeconds)*time.Second, cfg.MaxRetries, cfg.InitialBackoffSeconds, cfg.APICallsPerSecond, cfg.APIBurst, rng)
 	emailProcessor := emailprocessor.NewEmailProcessor()
-	fileHandler := filehandler.NewFileHandler(*workspacePath, o365Client, cfg.LargeAttachmentThresholdMB, cfg.ChunkSizeMB, cfg.BandwidthLimitMBs)
+	fileHandler := filehandler.NewFileHandler(*workspacePath, o365Client, emailProcessor, cfg.LargeAttachmentThresholdMB, cfg.ChunkSizeMB, cfg.BandwidthLimitMBs)
 
 	// --- Health Check or Main Engine Execution ---
 	if *healthCheck {

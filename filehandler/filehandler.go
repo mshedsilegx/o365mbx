@@ -18,6 +18,7 @@ import (
 	"golang.org/x/time/rate"
 
 	"o365mbx/apperrors"
+	"o365mbx/emailprocessor"
 	"o365mbx/o365client"
 )
 
@@ -45,12 +46,13 @@ type Metadata struct {
 type FileHandler struct {
 	workspacePath            string
 	o365Client               o365client.O365ClientInterface
+	emailProcessor           *emailprocessor.EmailProcessor
 	largeAttachmentThreshold int // in bytes
 	chunkSize                int // in bytes
 	bandwidthLimiter         *rate.Limiter
 }
 
-func NewFileHandler(workspacePath string, o365Client o365client.O365ClientInterface, largeAttachmentThresholdMB, chunkSizeMB int, bandwidthLimitMBs float64) *FileHandler {
+func NewFileHandler(workspacePath string, o365Client o365client.O365ClientInterface, emailProcessor *emailprocessor.EmailProcessor, largeAttachmentThresholdMB, chunkSizeMB int, bandwidthLimitMBs float64) *FileHandler {
 	var limiter *rate.Limiter
 	if bandwidthLimitMBs > 0 {
 		limit := rate.Limit(bandwidthLimitMBs * 1024 * 1024)
@@ -61,6 +63,7 @@ func NewFileHandler(workspacePath string, o365Client o365client.O365ClientInterf
 	return &FileHandler{
 		workspacePath:            workspacePath,
 		o365Client:               o365Client,
+		emailProcessor:           emailProcessor,
 		largeAttachmentThreshold: largeAttachmentThresholdMB * 1024 * 1024,
 		chunkSize:                chunkSizeMB * 1024 * 1024,
 		bandwidthLimiter:         limiter,
@@ -97,14 +100,26 @@ func (fh *FileHandler) SaveMessage(message *o365client.Message, bodyContent inte
 		return "", &apperrors.FileSystemError{Path: attachmentsPath, Msg: "failed to create attachments directory", Err: err}
 	}
 
-	bodyExt := ".html"
-	bodyContentType := "html"
-	if convertBody == "text" {
+	var bodyExt, bodyContentType string
+	switch convertBody {
+	case "text":
 		bodyExt = ".txt"
 		bodyContentType = "text"
-	} else if convertBody == "pdf" {
+	case "pdf":
 		bodyExt = ".pdf"
 		bodyContentType = "pdf"
+	case "none":
+		if contentStr, ok := bodyContent.(string); ok && fh.emailProcessor.IsHTML(contentStr) {
+			bodyExt = ".html"
+			bodyContentType = "html"
+		} else {
+			bodyExt = ".txt"
+			bodyContentType = "text"
+		}
+	default:
+		// Fallback for any unexpected value, though config validation should prevent this.
+		bodyExt = ".txt"
+		bodyContentType = "text"
 	}
 	bodyFileName := "body" + bodyExt
 

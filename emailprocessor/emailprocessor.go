@@ -13,6 +13,12 @@ import (
 )
 
 var spaceRegex = regexp.MustCompile(`\s+`)
+var htmlTagRegex = regexp.MustCompile(`(?i)<\s*\/?\s*[a-z-][^>]*>`)
+
+// IsHTML checks if a string contains HTML tags.
+func (ep *EmailProcessor) IsHTML(content string) bool {
+	return htmlTagRegex.MatchString(content)
+}
 
 type EmailProcessor struct{}
 
