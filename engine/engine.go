@@ -106,6 +106,7 @@ func runDownloadMode(ctx context.Context, cfg *Config, o365Client o365client.O36
 	var mu sync.Mutex
 
 	messageStates := make(map[string]*DownloadState)
+	var statesMutex sync.Mutex
 	messagesChan := make(chan o365client.Message, cfg.MaxParallelDownloads*2)
 	attachmentsChan := make(chan AttachmentJob, cfg.MaxParallelDownloads*4)
 	resultsChan := make(chan ProcessingResult, cfg.MaxParallelDownloads*4)
@@ -162,6 +163,8 @@ func runDownloadMode(ctx context.Context, cfg *Config, o365Client o365client.O36
 					if processingErr == nil {
 						processingErr = err
 					}
+					<-semaphore
+					continue
 				}
 
 				if cfg.ProcessingMode == "route" {
@@ -176,10 +179,12 @@ func runDownloadMode(ctx context.Context, cfg *Config, o365Client o365client.O36
 
 				if msg.HasAttachments {
 					log.WithFields(log.Fields{"count": len(msg.Attachments), "messageID": msg.ID}).Infof("Found attachments.")
+					statesMutex.Lock()
 					messageStates[msg.ID] = &DownloadState{
 						ExpectedAttachments: len(msg.Attachments),
 						Attachments:         make([]filehandler.AttachmentMetadata, 0, len(msg.Attachments)),
 					}
+					statesMutex.Unlock()
 					for i, att := range msg.Attachments {
 						attachmentsChan <- AttachmentJob{
 							Attachment:  att,
@@ -237,18 +242,30 @@ func runDownloadMode(ctx context.Context, cfg *Config, o365Client o365client.O36
 				} else {
 					atomic.AddUint32(&stats.AttachmentsProcessed, 1)
 					// Finalize metadata if this is the last attachment
-					state := messageStates[job.MessageID]
-					state.Mu.Lock()
-					state.CompletedAttachments++
-					state.Attachments = append(state.Attachments, *attMetadata)
-					if state.CompletedAttachments == state.ExpectedAttachments {
-						log.WithField("messageID", job.MessageID).Info("All attachments for message downloaded, writing final metadata.")
-						if err := fileHandler.WriteAttachmentsToMetadata(job.MsgPath, state.Attachments); err != nil {
-							atomic.AddUint32(&stats.NonFatalErrors, 1)
-							log.WithFields(log.Fields{"messageID": job.MessageID, "error": err}).Error("Failed to write final metadata.")
+					statesMutex.Lock()
+					state, ok := messageStates[job.MessageID]
+					if ok {
+						state.Mu.Lock()
+						state.CompletedAttachments++
+						state.Attachments = append(state.Attachments, *attMetadata)
+						isLastAttachment := state.CompletedAttachments == state.ExpectedAttachments
+						state.Mu.Unlock()
+
+						if isLastAttachment {
+							log.WithField("messageID", job.MessageID).Info("All attachments for message downloaded, writing final metadata.")
+							err := fileHandler.WriteAttachmentsToMetadata(job.MsgPath, state.Attachments)
+							if err != nil {
+								atomic.AddUint32(&stats.NonFatalErrors, 1)
+								log.WithFields(log.Fields{"messageID": job.MessageID, "error": err}).Error("Failed to write final metadata.")
+								if cfg.ProcessingMode == "route" {
+									resultsChan <- ProcessingResult{MessageID: job.MessageID, Err: err}
+								}
+							}
+							// Clean up state for the message
+							delete(messageStates, job.MessageID)
 						}
 					}
-					state.Mu.Unlock()
+					statesMutex.Unlock()
 				}
 
 				if cfg.ProcessingMode == "route" {
