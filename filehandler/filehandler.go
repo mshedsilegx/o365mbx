@@ -32,15 +32,15 @@ type AttachmentMetadata struct {
 
 // Metadata holds all metadata for a given email message.
 type Metadata struct {
-	To                []o365client.Recipient `json:"to"`
-	Cc                []o365client.Recipient `json:"cc"`
-	From              o365client.Recipient   `json:"from"`
-	Subject           string                 `json:"subject"`
-	ReceivedDate      time.Time              `json:"received_date"`
-	BodyFile          string                 `json:"body"`
-	BodyContentType   string                 `json:"content_type_of_body"`
-	AttachmentCount   int                    `json:"attachment_counts"`
-	Attachments       []AttachmentMetadata   `json:"list_of_attachments"`
+	To              []o365client.Recipient `json:"to"`
+	Cc              []o365client.Recipient `json:"cc"`
+	From            o365client.Recipient   `json:"from"`
+	Subject         string                 `json:"subject"`
+	ReceivedDate    time.Time              `json:"received_date"`
+	BodyFile        string                 `json:"body"`
+	BodyContentType string                 `json:"content_type_of_body"`
+	AttachmentCount int                    `json:"attachment_counts"`
+	Attachments     []AttachmentMetadata   `json:"list_of_attachments"`
 }
 
 type FileHandler struct {

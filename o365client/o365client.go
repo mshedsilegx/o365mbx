@@ -342,9 +342,9 @@ type Recipient struct {
 
 // Message represents an email message from O365
 type Message struct {
-	ID               string      `json:"id"`
-	Subject          string      `json:"subject"`
-	ReceivedDateTime time.Time   `json:"receivedDateTime"`
+	ID               string    `json:"id"`
+	Subject          string    `json:"subject"`
+	ReceivedDateTime time.Time `json:"receivedDateTime"`
 	Body             struct {
 		ContentType string `json:"contentType"`
 		Content     string `json:"content"`
