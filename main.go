@@ -81,7 +81,12 @@ func validateWorkspacePath(path string) error {
 func main() {
 	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
 
-	accessToken := flag.String("token", "", "Access token for O356 API (can also be set via O365_ACCESS_TOKEN env var)")
+	// Token management flags
+	tokenString := flag.String("token-string", "", "JWT token as a string.")
+	tokenFile := flag.String("token-file", "", "Path to a file containing the JWT token.")
+	tokenEnv := flag.Bool("token-env", false, "Read JWT token from JWT_TOKEN environment variable.")
+	removeTokenFile := flag.Bool("remove-token-file", false, "Remove the token file after use (only if -token-file is specified).")
+
 	mailboxName := flag.String("mailbox", "", "Mailbox name (e.g., name@domain.com)")
 	workspacePath := flag.String("workspace", "", "Unique folder to store all artifacts")
 	timeoutSeconds := flag.Int("timeout", 120, "HTTP client timeout in seconds (default: 120)")
@@ -141,16 +146,11 @@ func main() {
 		cancel()
 	}()
 
-	// Prioritize environment variable for access token for better security
-	tokenFromEnv := os.Getenv("O365_ACCESS_TOKEN")
-	if tokenFromEnv != "" {
-		*accessToken = tokenFromEnv
-		log.Info("Using access token from O365_ACCESS_TOKEN environment variable.")
+	accessToken, err := loadAccessToken(*tokenString, *tokenFile, *tokenEnv)
+	if err != nil {
+		log.Fatalf("Error loading access token: %v", err)
 	}
 
-	if *accessToken == "" {
-		log.WithField("argument", "accessToken").Fatalf("Error: Access token is missing. Provide it via -token flag or O365_ACCESS_TOKEN env var.")
-	}
 	if !isValidEmail(*mailboxName) {
 		log.WithField("argument", "mailboxName").Fatalf("Error: Invalid mailbox name format: %s", *mailboxName)
 	}
@@ -161,7 +161,7 @@ func main() {
 		log.WithField("argument", "state").Fatalf("Error: State file path must be provided for incremental processing mode.")
 	}
 
-	o365Client := o365client.NewO365Client(*accessToken, time.Duration(cfg.HTTPClientTimeoutSeconds)*time.Second, cfg.MaxRetries, cfg.InitialBackoffSeconds, cfg.APICallsPerSecond, cfg.APIBurst, rng)
+	o365Client := o365client.NewO365Client(accessToken, time.Duration(cfg.HTTPClientTimeoutSeconds)*time.Second, cfg.MaxRetries, cfg.InitialBackoffSeconds, cfg.APICallsPerSecond, cfg.APIBurst, rng)
 
 	if *healthCheck {
 		fmt.Println("O365 Mailbox Downloader - Health Check Mode")
@@ -170,7 +170,64 @@ func main() {
 		os.Exit(0)
 	}
 
-	runDownloadMode(ctx, cfg, *accessToken, *mailboxName, *workspacePath, *processingMode, *stateFilePath, rng)
+	// Defer the token file removal if requested
+	defer func() {
+		if *tokenFile != "" && *removeTokenFile {
+			log.WithField("file", *tokenFile).Info("Removing token file as requested.")
+			if err := os.Remove(*tokenFile); err != nil {
+				log.WithField("file", *tokenFile).Errorf("Failed to remove token file: %v", err)
+			}
+		}
+	}()
+
+	runDownloadMode(ctx, cfg, accessToken, *mailboxName, *workspacePath, *processingMode, *stateFilePath, rng)
+}
+
+func loadAccessToken(tokenString, tokenFile string, tokenEnv bool) (string, error) {
+	// Validate that exactly one token source is specified
+	sourceCount := 0
+	if tokenString != "" {
+		sourceCount++
+	}
+	if tokenFile != "" {
+		sourceCount++
+	}
+	if tokenEnv {
+		sourceCount++
+	}
+
+	if sourceCount == 0 {
+		return "", fmt.Errorf("no token source specified. Please use one of -token-string, -token-file, or -token-env")
+	}
+	if sourceCount > 1 {
+		return "", fmt.Errorf("multiple token sources specified. Please use only one of -token-string, -token-file, or -token-env")
+	}
+
+	// Load token from the specified source
+	if tokenString != "" {
+		log.Info("Using token from -token-string flag.")
+		return tokenString, nil
+	}
+
+	if tokenFile != "" {
+		log.Info("Using token from file specified by -token-file.")
+		content, err := os.ReadFile(tokenFile)
+		if err != nil {
+			return "", fmt.Errorf("failed to read token file %s: %w", tokenFile, err)
+		}
+		return strings.TrimSpace(string(content)), nil
+	}
+
+	if tokenEnv {
+		log.Info("Using token from JWT_TOKEN environment variable.")
+		token := os.Getenv("JWT_TOKEN")
+		if token == "" {
+			return "", fmt.Errorf("-token-env specified, but JWT_TOKEN environment variable is not set")
+		}
+		return token, nil
+	}
+
+	return "", fmt.Errorf("internal error: no token source identified") // Should be unreachable
 }
 
 type AttachmentJob struct {
