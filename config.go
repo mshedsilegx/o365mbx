@@ -75,10 +75,10 @@ func (c *Config) SetDefaults() {
 		c.ProcessingMode = "full" // Default: full processing
 	}
 	if c.ProcessedFolder == "" {
-		c.ProcessedFolder = "Processed"
+		c.ProcessedFolder = "processed"
 	}
 	if c.ErrorFolder == "" {
-		c.ErrorFolder = "Error"
+		c.ErrorFolder = "error"
 	}
 }
 

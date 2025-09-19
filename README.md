@@ -54,8 +54,8 @@ All configuration options can be controlled via command-line arguments. Any flag
 | `-processing-mode`              | Processing mode: `full`, `incremental`, or `route`.                       | No       | `full`  |
 | `-state`                        | Path to the state file for incremental processing.                        | No       |         |
 | `-state-save-interval`          | Save state every N messages during a run.                                 | No       | `100`   |
-| `-processed-folder`             | Destination folder for successful messages in `route` mode.               | No       | `Processed`|
-| `-error-folder`                 | Destination folder for failed messages in `route` mode.                   | No       | `Error` |
+| `-processed-folder`             | Destination folder for successful messages in `route` mode.               | No       | `processed`|
+| `-error-folder`                 | Destination folder for failed messages in `route` mode.                   | No       | `error` |
 | **Performance & Limits**        |                                                                           |          |         |
 | `-parallel`                     | Maximum number of parallel workers.                                       | No       | `10`    |
 | `-timeout`                      | HTTP client timeout in seconds.                                           | No       | `120`   |

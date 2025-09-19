@@ -105,8 +105,8 @@ func main() {
 	debug := flag.Bool("debug", false, "Enable debug logging")
 	processingMode := flag.String("processing-mode", "full", "Processing mode: 'full' or 'incremental'")
 	stateFilePath := flag.String("state", "", "Path to the state file for incremental processing")
-	processedFolder := flag.String("processed-folder", "Processed", "Destination folder for successfully processed messages in route mode.")
-	errorFolder := flag.String("error-folder", "Error", "Destination folder for messages that failed processing in route mode.")
+	processedFolder := flag.String("processed-folder", "processed", "Destination folder for successfully processed messages in route mode.")
+	errorFolder := flag.String("error-folder", "error", "Destination folder for messages that failed processing in route mode.")
 	flag.Parse()
 
 	log.SetFormatter(&log.TextFormatter{FullTimestamp: true})
