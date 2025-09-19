@@ -259,7 +259,6 @@ func runAggregator(ctx context.Context, cfg *Config, o365Client o365client.O365C
 	log.Info("Aggregator started.")
 
 	messageStates := make(map[string]*MessageState)
-	var mu sync.Mutex
 
 	processedFolderID, err := o365Client.GetOrCreateFolderIDByName(ctx, mailboxName, cfg.ProcessedFolder)
 	if err != nil {
@@ -271,12 +270,10 @@ func runAggregator(ctx context.Context, cfg *Config, o365Client o365client.O365C
 	}
 
 	for result := range resultsChan {
-		mu.Lock()
 		state, exists := messageStates[result.MessageID]
 		if !exists {
 			if !result.IsInitialization {
 				log.Errorf("Aggregator received non-initialization result for unknown message ID: %s. This should not happen.", result.MessageID)
-				mu.Unlock()
 				continue
 			}
 			state = &MessageState{ExpectedTasks: result.TotalTasks}
@@ -302,7 +299,6 @@ func runAggregator(ctx context.Context, cfg *Config, o365Client o365client.O365C
 			}
 			delete(messageStates, result.MessageID)
 		}
-		mu.Unlock()
 	}
 	log.Info("Aggregator finished.")
 }
