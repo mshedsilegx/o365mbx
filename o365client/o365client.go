@@ -1,6 +1,7 @@
 package o365client
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -21,9 +22,10 @@ const graphAPIBaseURL = "https://graph.microsoft.com/v1.0"
 // O365ClientInterface defines the interface for O365Client methods used by other packages.
 type O365ClientInterface interface {
 	DoRequestWithRetry(req *http.Request) (*http.Response, error)
-	GetMessages(ctx context.Context, mailboxName string, state *RunState) ([]Message, error)
-	GetAttachments(ctx context.Context, mailboxName, messageID string) ([]Attachment, error)
-	GetAttachmentDetails(ctx context.Context, mailboxName, messageID, attachmentID string) (*Attachment, error)
+	GetMessages(ctx context.Context, mailboxName, sourceFolderID string, state *RunState, messagesChan chan<- Message) error
+	GetMailboxStatistics(ctx context.Context, mailboxName string) (int, error)
+	MoveMessage(ctx context.Context, mailboxName, messageID, destinationFolderID string) error
+	GetOrCreateFolderIDByName(ctx context.Context, mailboxName, folderName string) (string, error)
 }
 
 type O365Client struct {
@@ -96,18 +98,20 @@ func (c *O365Client) DoRequestWithRetry(req *http.Request) (*http.Response, erro
 	return nil, fmt.Errorf("failed after %d retries (no specific last error encountered)", maxRetries)
 }
 
-// GetMessages fetches a list of messages for a given mailbox.
-func (c *O365Client) GetMessages(ctx context.Context, mailboxName string, state *RunState) ([]Message, error) { // ctx added
-	var allMessages []Message
+// GetMessages fetches a list of messages for a given mailbox and streams them to a channel.
+func (c *O365Client) GetMessages(ctx context.Context, mailboxName, sourceFolderID string, state *RunState, messagesChan chan<- Message) error {
+	defer close(messagesChan) // Close the channel when the function finishes
 
-	baseURL, err := url.Parse(fmt.Sprintf("%s/users/%s/messages", graphAPIBaseURL, mailboxName))
+	baseURL, err := url.Parse(fmt.Sprintf("%s/users/%s/mailFolders/%s/messages", graphAPIBaseURL, mailboxName, sourceFolderID))
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse base URL: %w", err)
+		return fmt.Errorf("failed to parse base URL: %w", err)
 	}
 
 	params := url.Values{}
 	// Always sort by receivedDateTime and then by id for deterministic ordering.
 	params.Add("$orderby", "receivedDateTime asc, id asc")
+	// Use $expand to fetch attachments along with the message data in a single call.
+	params.Add("$expand", "attachments")
 
 	// If a timestamp is available from a previous run, use it to filter.
 	if !state.LastRunTimestamp.IsZero() {
@@ -124,41 +128,42 @@ func (c *O365Client) GetMessages(ctx context.Context, mailboxName string, state 
 		select {
 		case <-ctx.Done():
 			log.WithField("error", ctx.Err()).Warn("Context cancelled during message fetching.")
-			return nil, ctx.Err() // Return context cancellation error
+			return ctx.Err() // Return context cancellation error
 		default:
 			// Continue
 		}
 
 		req, err := http.NewRequestWithContext(ctx, "GET", nextLink, nil) // Pass ctx to request
 		if err != nil {
-			return nil, fmt.Errorf("failed to create HTTP request for messages: %w", err)
+			return fmt.Errorf("failed to create HTTP request for messages: %w", err)
 		}
 		req.Header.Set("Authorization", "Bearer "+c.accessToken)
 
 		resp, err := c.DoRequestWithRetry(req)
 		if err != nil {
-			return nil, fmt.Errorf("failed to fetch messages: %w", err)
+			return fmt.Errorf("failed to fetch messages: %w", err)
 		}
-		defer func() {
-			if err := resp.Body.Close(); err != nil {
-				log.Warnf("Error closing response body in GetMessages: %v", err)
-			}
-		}()
 
 		if resp.StatusCode != http.StatusOK {
-			errorBody, _ := io.ReadAll(resp.Body) // Read body for detailed error
+			errorBody, _ := io.ReadAll(resp.Body)
 			if err := resp.Body.Close(); err != nil {
 				log.Warnf("Error closing response body after reading error: %v", err)
 			}
 			if resp.StatusCode == http.StatusUnauthorized {
-				return nil, &apperrors.AuthError{Msg: "invalid or expired access token"}
+				return &apperrors.AuthError{Msg: "invalid or expired access token"}
 			}
-			return nil, &apperrors.APIError{StatusCode: resp.StatusCode, Msg: string(errorBody)}
+			return &apperrors.APIError{StatusCode: resp.StatusCode, Msg: string(errorBody)}
 		}
 
 		body, err := io.ReadAll(resp.Body)
 		if err != nil {
-			return nil, fmt.Errorf("failed to read response body for attachments: %w", err)
+			if err := resp.Body.Close(); err != nil {
+				log.Warnf("Error closing response body after read failure: %v", err)
+			}
+			return fmt.Errorf("failed to read response body for messages: %w", err)
+		}
+		if err := resp.Body.Close(); err != nil {
+			log.Warnf("Error closing response body in GetMessages: %v", err)
 		}
 
 		var response struct {
@@ -167,114 +172,110 @@ func (c *O365Client) GetMessages(ctx context.Context, mailboxName string, state 
 		}
 		err = json.Unmarshal(body, &response)
 		if err != nil {
-			return nil, fmt.Errorf("failed to unmarshal messages response: %w", err)
+			return fmt.Errorf("failed to unmarshal messages response: %w", err)
 		}
 
-		allMessages = append(allMessages, response.Value...)
+		for _, msg := range response.Value {
+			select {
+			case messagesChan <- msg:
+			case <-ctx.Done():
+				log.WithField("error", ctx.Err()).Warn("Context cancelled during message streaming.")
+				return ctx.Err()
+			}
+		}
 		nextLink = response.OdataNextLink
 	}
 
-	return allMessages, nil
+	return nil
 }
 
-// GetAttachments fetches attachment metadata for a given message.
-func (c *O365Client) GetAttachments(ctx context.Context, mailboxName, messageID string) ([]Attachment, error) { // ctx added
-	url := fmt.Sprintf("%s/users/%s/messages/%s/attachments", graphAPIBaseURL, mailboxName, messageID)
-
-	select {
-	case <-ctx.Done():
-		log.WithField("error", ctx.Err()).Warn("Context cancelled during attachment fetching.")
-		return nil, ctx.Err() // Return context cancellation error
-	default:
-		// Continue
-	}
-
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil) // Pass ctx to request
-	if err != nil {
-		return nil, fmt.Errorf("failed to create HTTP request for attachments: %w", err)
-	}
-	req.Header.Set("Authorization", "Bearer "+c.accessToken)
-
-	resp, err := c.DoRequestWithRetry(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch attachments: %w", err)
-	}
-	defer func() {
-		if err := resp.Body.Close(); err != nil {
-			log.Warnf("Error closing response body in GetAttachments: %v", err)
-		}
-	}()
-
-	if resp.StatusCode != http.StatusOK {
-		errorBody, _ := io.ReadAll(resp.Body) // Read body for detailed error
-		if err := resp.Body.Close(); err != nil {
-			log.Warnf("Error closing response body after reading error in GetAttachments: %v", err)
-		}
-		if resp.StatusCode == http.StatusUnauthorized {
-			return nil, &apperrors.AuthError{Msg: "invalid or expired access token"}
-		}
-		return nil, &apperrors.APIError{StatusCode: resp.StatusCode, Msg: string(errorBody)}
-	}
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read response body for attachments: %w", err)
-	}
-
-	var response struct {
-		Value []Attachment `json:"value"`
-	}
-	err = json.Unmarshal(body, &response)
-	if err != nil {
-		return nil, fmt.Errorf("failed to unmarshal attachments response: %w", err)
-	}
-
-	return response.Value, nil
+type MailFolder struct {
+	ID          string `json:"id"`
+	DisplayName string `json:"displayName"`
 }
 
-// GetAttachmentDetails fetches the full details for a single attachment.
-func (c *O365Client) GetAttachmentDetails(ctx context.Context, mailboxName, messageID, attachmentID string) (*Attachment, error) {
-	url := fmt.Sprintf("%s/users/%s/messages/%s/attachments/%s", graphAPIBaseURL, mailboxName, messageID, attachmentID)
-
+func (c *O365Client) GetOrCreateFolderIDByName(ctx context.Context, mailboxName, folderName string) (string, error) {
+	// First, try to get the folder by name
+	url := fmt.Sprintf("%s/users/%s/mailFolders?$filter=displayName eq '%s'", graphAPIBaseURL, mailboxName, url.QueryEscape(folderName))
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create HTTP request for attachment details: %w", err)
+		return "", fmt.Errorf("failed to create request to get folder by name: %w", err)
 	}
 	req.Header.Set("Authorization", "Bearer "+c.accessToken)
 
 	resp, err := c.DoRequestWithRetry(req)
 	if err != nil {
-		return nil, fmt.Errorf("failed to fetch attachment details: %w", err)
+		return "", fmt.Errorf("failed to get folder by name: %w", err)
+	}
+
+	if resp.StatusCode == http.StatusOK {
+		body, err := io.ReadAll(resp.Body)
+		if err := resp.Body.Close(); err != nil {
+			log.Warnf("Failed to close response body for folder check: %v", err)
+		}
+		if err != nil {
+			return "", fmt.Errorf("failed to read response body for folder: %w", err)
+		}
+
+		var folderResponse struct {
+			Value []MailFolder `json:"value"`
+		}
+		if err := json.Unmarshal(body, &folderResponse); err != nil {
+			return "", fmt.Errorf("failed to unmarshal folder response: %w", err)
+		}
+
+		if len(folderResponse.Value) > 0 {
+			log.WithField("folderName", folderName).Info("Found existing folder.")
+			return folderResponse.Value[0].ID, nil
+		}
+	} else {
+		if err := resp.Body.Close(); err != nil {
+			log.Warnf("Failed to close error response body for folder check: %v", err)
+		}
+	}
+
+	// If not found, create it
+	log.WithField("folderName", folderName).Info("Folder not found, creating it.")
+	return c.createFolder(ctx, mailboxName, folderName)
+}
+
+func (c *O365Client) createFolder(ctx context.Context, mailboxName, folderName string) (string, error) {
+	url := fmt.Sprintf("%s/users/%s/mailFolders", graphAPIBaseURL, mailboxName)
+	folderData := MailFolder{DisplayName: folderName}
+	body, err := json.Marshal(folderData)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal folder data: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(body))
+	if err != nil {
+		return "", fmt.Errorf("failed to create request to create folder: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+c.accessToken)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.DoRequestWithRetry(req)
+	if err != nil {
+		return "", fmt.Errorf("failed to create folder: %w", err)
 	}
 	defer func() {
 		if err := resp.Body.Close(); err != nil {
-			log.Warnf("Error closing response body in GetAttachmentDetails: %v", err)
+			log.Warnf("Failed to close response body for create folder: %v", err)
 		}
 	}()
 
-	if resp.StatusCode != http.StatusOK {
+	if resp.StatusCode != http.StatusCreated {
 		errorBody, _ := io.ReadAll(resp.Body)
-		if err := resp.Body.Close(); err != nil {
-			log.Warnf("Error closing response body after reading error in GetAttachmentDetails: %v", err)
-		}
-		if resp.StatusCode == http.StatusUnauthorized {
-			return nil, &apperrors.AuthError{Msg: "invalid or expired access token"}
-		}
-		return nil, &apperrors.APIError{StatusCode: resp.StatusCode, Msg: string(errorBody)}
+		return "", &apperrors.APIError{StatusCode: resp.StatusCode, Msg: fmt.Sprintf("failed to create folder: %s", string(errorBody))}
 	}
 
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read response body for attachment details: %w", err)
+	var newFolder MailFolder
+	if err := json.NewDecoder(resp.Body).Decode(&newFolder); err != nil {
+		return "", fmt.Errorf("failed to unmarshal new folder response: %w", err)
 	}
 
-	var attachment Attachment
-	err = json.Unmarshal(body, &attachment)
-	if err != nil {
-		return nil, fmt.Errorf("failed to unmarshal attachment details response: %w", err)
-	}
-
-	return &attachment, nil
+	log.WithFields(log.Fields{"folderName": folderName, "folderId": newFolder.ID}).Info("Successfully created folder.")
+	return newFolder.ID, nil
 }
 
 // GetMailboxStatistics fetches the total message count for a given mailbox's Inbox.
@@ -335,7 +336,8 @@ type Message struct {
 		ContentType string `json:"contentType"`
 		Content     string `json:"content"`
 	} `json:"body"`
-	HasAttachments bool `json:"hasAttachments"`
+	HasAttachments bool         `json:"hasAttachments"`
+	Attachments    []Attachment `json:"attachments"`
 }
 
 // Attachment represents an attachment from O365
@@ -354,4 +356,34 @@ type Attachment struct {
 type RunState struct {
 	LastRunTimestamp time.Time `json:"lastRunTimestamp"`
 	LastMessageID    string    `json:"lastMessageId"`
+}
+
+// MoveMessage moves a message to a specified destination folder.
+func (c *O365Client) MoveMessage(ctx context.Context, mailboxName, messageID, destinationFolderID string) error {
+	url := fmt.Sprintf("%s/users/%s/messages/%s/move", graphAPIBaseURL, mailboxName, messageID)
+
+	body := []byte(fmt.Sprintf(`{"destinationId": "%s"}`, destinationFolderID))
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(body))
+	if err != nil {
+		return fmt.Errorf("failed to create HTTP request for moving message: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+c.accessToken)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.DoRequestWithRetry(req)
+	if err != nil {
+		return fmt.Errorf("failed to move message %s: %w", messageID, err)
+	}
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			log.Warnf("Failed to close response body for move message: %v", err)
+		}
+	}()
+
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+		errorBody, _ := io.ReadAll(resp.Body)
+		return &apperrors.APIError{StatusCode: resp.StatusCode, Msg: fmt.Sprintf("failed to move message: %s", string(errorBody))}
+	}
+
+	return nil
 }

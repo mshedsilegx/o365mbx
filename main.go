@@ -5,104 +5,107 @@ import (
 	"flag"
 	"fmt"
 	"math/rand"
+	"o365mbx/emailprocessor"
+	"o365mbx/engine"
+	"o365mbx/filehandler"
+	"o365mbx/o365client"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"regexp"
-	"sync"
+	"strings"
 	"syscall"
 	"time"
 
 	log "github.com/sirupsen/logrus"
-
-	"o365mbx/emailprocessor"
-	"o365mbx/filehandler"
-	"o365mbx/o365client"
 )
 
 var version = "dev"
 
-func isValidEmail(email string) bool {
-	emailRegex := regexp.MustCompile(`^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$`)
-	return emailRegex.MatchString(email)
-}
-
-func validateWorkspacePath(path string) error {
-	if path == "" {
-		return fmt.Errorf("workspace path cannot be empty")
-	}
-	if !filepath.IsAbs(path) {
-		return fmt.Errorf("workspace path must be an absolute path: %s", path)
-	}
-	if err := os.MkdirAll(path, 0755); err != nil {
-		return fmt.Errorf("failed to create workspace directory %s: %w", path, err)
-	}
-	info, err := os.Stat(path)
-	if err != nil {
-		return fmt.Errorf("failed to stat workspace directory %s: %w", path, err)
-	}
-	if !info.IsDir() {
-		return fmt.Errorf("workspace path %s is not a directory", path)
-	}
-	return nil
-}
-
 func main() {
 	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
 
-	accessToken := flag.String("token", "", "Access token for O356 API")
+	// --- Flag Definition ---
+	tokenString := flag.String("token-string", "", "JWT token as a string.")
+	tokenFile := flag.String("token-file", "", "Path to a file containing the JWT token.")
+	tokenEnv := flag.Bool("token-env", false, "Read JWT token from JWT_TOKEN environment variable.")
+	removeTokenFile := flag.Bool("remove-token-file", false, "Remove the token file after use (only if -token-file is specified).")
 	mailboxName := flag.String("mailbox", "", "Mailbox name (e.g., name@domain.com)")
 	workspacePath := flag.String("workspace", "", "Unique folder to store all artifacts")
-	timeoutSeconds := flag.Int("timeout", 120, "HTTP client timeout in seconds (default: 120)")
-	maxParallelDownloads := flag.Int("parallel", 10, "Maximum number of parallel downloads (default: 10)")
 	configPath := flag.String("config", "", "Path to the configuration file (JSON)")
-	apiCallsPerSecond := flag.Float64("api-rate", 0, "API calls per second for client-side rate limiting (default: 5.0)")
-	apiBurst := flag.Int("api-burst", 0, "API burst capacity for client-side rate limiting (default: 10)")
 	displayVersion := flag.Bool("version", false, "Display application version")
 	healthCheck := flag.Bool("healthcheck", false, "Perform a health check on the mailbox and exit")
 	debug := flag.Bool("debug", false, "Enable debug logging")
-	processingMode := flag.String("processing-mode", "full", "Processing mode: 'full' or 'incremental'")
+	processingMode := flag.String("processing-mode", "", "Processing mode: 'full', 'incremental', or 'route'.")
+	inboxFolder := flag.String("inbox-folder", "", "The source folder from which to process messages.")
 	stateFilePath := flag.String("state", "", "Path to the state file for incremental processing")
+	processedFolder := flag.String("processed-folder", "", "Destination folder for successfully processed messages in route mode.")
+	errorFolder := flag.String("error-folder", "", "Destination folder for messages that failed processing in route mode.")
+	timeoutSeconds := flag.Int("timeout", 0, "HTTP client timeout in seconds.")
+	maxParallelDownloads := flag.Int("parallel", 0, "Maximum number of parallel downloads.")
+	apiCallsPerSecond := flag.Float64("api-rate", 0, "API calls per second for client-side rate limiting.")
+	apiBurst := flag.Int("api-burst", 0, "API burst capacity for client-side rate limiting.")
+	maxRetries := flag.Int("max-retries", 0, "Maximum number of retries for failed API calls.")
+	initialBackoffSeconds := flag.Int("initial-backoff-seconds", 0, "Initial backoff in seconds for retries.")
+	chunkSizeMB := flag.Int("chunk-size-mb", 0, "Chunk size in MB for large attachment downloads.")
+	largeAttachmentThresholdMB := flag.Int("large-attachment-threshold-mb", 0, "Threshold in MB for large attachments.")
+	stateSaveInterval := flag.Int("state-save-interval", 0, "Save state every N messages.")
+	bandwidthLimitMBs := flag.Float64("bandwidth-limit-mbs", 0, "Bandwidth limit in MB/s for downloads (0 for disabled).")
 	flag.Parse()
 
+	// --- Configuration Loading and Merging ---
+	cfg, err := engine.LoadConfig(*configPath)
+	if err != nil {
+		log.Fatalf("Error loading configuration: %v", err)
+	}
+
+	flag.Visit(func(f *flag.Flag) {
+		switch f.Name {
+		case "token-string": cfg.TokenString = *tokenString
+		case "token-file": cfg.TokenFile = *tokenFile
+		case "token-env": cfg.TokenEnv = *tokenEnv
+		case "remove-token-file": cfg.RemoveTokenFile = *removeTokenFile
+		case "debug": cfg.DebugLogging = *debug
+		case "processing-mode": cfg.ProcessingMode = *processingMode
+		case "inbox-folder": cfg.InboxFolder = *inboxFolder
+		case "state": cfg.StateFilePath = *stateFilePath
+		case "processed-folder": cfg.ProcessedFolder = *processedFolder
+		case "error-folder": cfg.ErrorFolder = *errorFolder
+		case "timeout": cfg.HTTPClientTimeoutSeconds = *timeoutSeconds
+		case "parallel": cfg.MaxParallelDownloads = *maxParallelDownloads
+		case "api-rate": cfg.APICallsPerSecond = *apiCallsPerSecond
+		case "api-burst": cfg.APIBurst = *apiBurst
+		case "max-retries": cfg.MaxRetries = *maxRetries
+		case "initial-backoff-seconds": cfg.InitialBackoffSeconds = *initialBackoffSeconds
+		case "chunk-size-mb": cfg.ChunkSizeMB = *chunkSizeMB
+		case "large-attachment-threshold-mb": cfg.LargeAttachmentThresholdMB = *largeAttachmentThresholdMB
+		case "state-save-interval": cfg.StateSaveInterval = *stateSaveInterval
+		case "bandwidth-limit-mbs": cfg.BandwidthLimitMBs = *bandwidthLimitMBs
+		}
+	})
+
+	// --- Logging Setup ---
 	log.SetFormatter(&log.TextFormatter{FullTimestamp: true})
-	if *debug {
+	if cfg.DebugLogging {
 		log.SetLevel(log.DebugLevel)
 		log.Debugln("Debug logging enabled.")
 	} else {
 		log.SetLevel(log.InfoLevel)
 	}
 
+	// --- Early Exit flags ---
 	if *displayVersion {
 		fmt.Printf("O365 Mailbox Downloader Version: %s\n", version)
 		os.Exit(0)
 	}
 
-	cfg, err := LoadConfig(*configPath)
-	if err != nil {
-		log.Fatalf("Error loading configuration: %v", err)
-	}
-
-	if *timeoutSeconds != 120 {
-		cfg.HTTPClientTimeoutSeconds = *timeoutSeconds
-	}
-	if *maxParallelDownloads != 10 {
-		cfg.MaxParallelDownloads = *maxParallelDownloads
-	}
-	if *apiCallsPerSecond != 0 {
-		cfg.APICallsPerSecond = *apiCallsPerSecond
-	}
-	if *apiBurst != 0 {
-		cfg.APIBurst = *apiBurst
-	}
-
+	// --- Configuration Validation ---
 	if err := cfg.Validate(); err != nil {
 		log.Fatalf("Invalid configuration: %v", err)
 	}
 
+	// --- Context and Signal Handling ---
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
@@ -110,182 +113,97 @@ func main() {
 		cancel()
 	}()
 
-	if *accessToken == "" {
-		log.WithField("argument", "accessToken").Fatalf("Error: Access token is missing.")
+	// --- Token Loading ---
+	accessToken, err := loadAccessToken(cfg)
+	if err != nil {
+		log.Fatalf("Error loading access token: %v", err)
+	}
+
+	// --- Final Validation ---
+	if *mailboxName == "" {
+		log.Fatal("Error: -mailbox is a required argument.")
 	}
 	if !isValidEmail(*mailboxName) {
-		log.WithField("argument", "mailboxName").Fatalf("Error: Invalid mailbox name format: %s", *mailboxName)
+		log.Fatalf("Error: Invalid mailbox name format: %s", *mailboxName)
 	}
-	if *processingMode != "full" && *processingMode != "incremental" {
-		log.WithField("argument", "processing-mode").Fatalf("Error: Invalid processing mode. Must be 'full' or 'incremental'.")
+	if cfg.ProcessingMode == "incremental" && cfg.StateFilePath == "" {
+		log.Fatal("Error: State file path must be provided for incremental processing mode.")
 	}
-	if *processingMode == "incremental" && *stateFilePath == "" {
-		log.WithField("argument", "state").Fatalf("Error: State file path must be provided for incremental processing mode.")
+	if cfg.ProcessingMode == "route" {
+		if cfg.ProcessedFolder == "" {
+			log.Fatal("Error: Processed folder name must be provided for route mode.")
+		}
+		if cfg.ErrorFolder == "" {
+			log.Fatal("Error: Error folder name must be provided for route mode.")
+		}
 	}
 
-	o365Client := o365client.NewO365Client(*accessToken, time.Duration(cfg.HTTPClientTimeoutSeconds)*time.Second, cfg.MaxRetries, cfg.InitialBackoffSeconds, cfg.APICallsPerSecond, cfg.APIBurst, rng)
+	// --- Dependency Injection ---
+	o365Client := o365client.NewO365Client(accessToken, time.Duration(cfg.HTTPClientTimeoutSeconds)*time.Second, cfg.MaxRetries, cfg.InitialBackoffSeconds, cfg.APICallsPerSecond, cfg.APIBurst, rng)
+	emailProcessor := emailprocessor.NewEmailProcessor()
+	fileHandler := filehandler.NewFileHandler(*workspacePath, o365Client, cfg.LargeAttachmentThresholdMB, cfg.ChunkSizeMB, cfg.BandwidthLimitMBs)
 
+	// --- Health Check or Main Engine Execution ---
 	if *healthCheck {
-		fmt.Println("O365 Mailbox Downloader - Health Check Mode")
-		log.Infof("Version: %s", version)
 		runHealthCheckMode(ctx, o365Client, *mailboxName)
 		os.Exit(0)
 	}
 
-	runDownloadMode(ctx, cfg, *accessToken, *mailboxName, *workspacePath, *processingMode, *stateFilePath, rng)
+	// Defer the token file removal if requested
+	defer func() {
+		if cfg.TokenFile != "" && cfg.RemoveTokenFile {
+			log.WithField("file", cfg.TokenFile).Info("Removing token file as requested.")
+			if err := os.Remove(cfg.TokenFile); err != nil {
+				log.WithField("file", cfg.TokenFile).Errorf("Failed to remove token file: %v", err)
+			}
+		}
+	}()
+
+	engine.RunEngine(ctx, cfg, o365Client, emailProcessor, fileHandler, accessToken, *mailboxName, *workspacePath, version)
 }
 
-func runDownloadMode(ctx context.Context, cfg *Config, accessToken, mailboxName, workspacePath, processingMode, stateFilePath string, rng *rand.Rand) {
-	if err := validateWorkspacePath(workspacePath); err != nil {
-		log.Fatalf("Error validating workspace path: %v", err)
+func loadAccessToken(cfg *engine.Config) (string, error) {
+	sourceCount := 0
+	if cfg.TokenString != "" { sourceCount++ }
+	if cfg.TokenFile != "" { sourceCount++ }
+	if cfg.TokenEnv { sourceCount++ }
+
+	if sourceCount == 0 {
+		return "", fmt.Errorf("no token source specified. Please use one of -token-string, -token-file, or -token-env (or their config file equivalents)")
+	}
+	if sourceCount > 1 {
+		return "", fmt.Errorf("multiple token sources specified. Please use only one of -token-string, -token-file, or -token-env (or their config file equivalents)")
 	}
 
-	fmt.Println("O365 Mailbox Downloader")
-	log.Infof("Version: %s", version)
-	log.Info("Application started.")
-
-	o365Client := o365client.NewO365Client(accessToken, time.Duration(cfg.HTTPClientTimeoutSeconds)*time.Second, cfg.MaxRetries, cfg.InitialBackoffSeconds, cfg.APICallsPerSecond, cfg.APIBurst, rng)
-	emailProcessor := emailprocessor.NewEmailProcessor()
-	fileHandler := filehandler.NewFileHandler(workspacePath, o365Client, cfg.LargeAttachmentThresholdMB, cfg.ChunkSizeMB)
-
-	if err := fileHandler.CreateWorkspace(); err != nil {
-		log.Fatalf("Error creating workspace: %v", err)
+	if cfg.TokenString != "" {
+		log.Info("Using token from tokenString.")
+		return cfg.TokenString, nil
 	}
-	log.WithField("path", workspacePath).Infof("Workspace created.")
-
-	var state *o365client.RunState
-	var err error
-	if processingMode == "incremental" {
-		state, err = fileHandler.LoadState(stateFilePath)
+	if cfg.TokenFile != "" {
+		log.Info("Using token from tokenFile.")
+		content, err := os.ReadFile(cfg.TokenFile)
 		if err != nil {
-			log.Fatalf("Error loading state file: %v", err)
+			return "", fmt.Errorf("failed to read token file %s: %w", cfg.TokenFile, err)
 		}
-		if !state.LastRunTimestamp.IsZero() {
-			log.WithFields(log.Fields{
-				"lastRunTimestamp": state.LastRunTimestamp.Format(time.RFC3339Nano),
-				"lastMessageID":    state.LastMessageID,
-			}).Infof("Found previous state. Fetching emails since last run.")
-		} else {
-			log.Info("No previous state found. Fetching all available emails.")
+		return strings.TrimSpace(string(content)), nil
+	}
+	if cfg.TokenEnv {
+		log.Info("Using token from JWT_TOKEN environment variable.")
+		token := os.Getenv("JWT_TOKEN")
+		if token == "" {
+			return "", fmt.Errorf("tokenEnv specified, but JWT_TOKEN environment variable is not set")
 		}
-	} else {
-		log.Info("Running in full processing mode. Fetching all available emails.")
-		state = &o365client.RunState{}
+		return token, nil
 	}
-
-	messages, err := o365Client.GetMessages(ctx, mailboxName, state)
-	if err != nil {
-		log.Fatalf("O365 API error fetching messages: %v", err)
-	}
-	log.WithField("count", len(messages)).Infof("Fetched messages.")
-
-	var messagesToProcess []o365client.Message
-	if processingMode == "incremental" && state.LastMessageID != "" && len(messages) > 0 && messages[0].ID == state.LastMessageID {
-		messagesToProcess = messages[1:]
-		log.WithField("messageID", state.LastMessageID).Debug("Skipping first message as it was the last one processed in the previous run.")
-	} else {
-		messagesToProcess = messages
-	}
-
-	if len(messagesToProcess) == 0 {
-		log.Info("No new messages to process.")
-		log.Info("Application finished.")
-		return
-	}
-
-	var newLatestMessage o365client.Message
-	var mu sync.Mutex
-	var wg sync.WaitGroup
-	semaphore := make(chan struct{}, cfg.MaxParallelDownloads)
-
-	for _, msg := range messagesToProcess {
-		wg.Add(1)
-		semaphore <- struct{}{}
-		go func(msg o365client.Message) {
-			defer wg.Done()
-			defer func() { <-semaphore }()
-
-			log.WithFields(log.Fields{"messageID": msg.ID, "subject": msg.Subject}).Infof("Processing message.")
-
-			cleanedBody, err := emailProcessor.CleanHTML(msg.Body.Content)
-			if err != nil {
-				log.WithFields(log.Fields{"messageID": msg.ID, "error": err}).Warn("Failed to clean HTML for message.")
-				cleanedBody = msg.Body.Content
-			}
-			if err := fileHandler.SaveEmailBody(msg.Subject, msg.ID, cleanedBody); err != nil {
-				log.WithFields(log.Fields{"messageID": msg.ID, "error": err}).Errorf("Error saving email body.")
-			}
-
-			if msg.HasAttachments {
-				attachments, err := o365Client.GetAttachments(ctx, mailboxName, msg.ID)
-				if err != nil {
-					log.WithFields(log.Fields{"messageID": msg.ID, "error": err}).Errorf("O365 API error fetching attachments.")
-					return
-				}
-				log.WithFields(log.Fields{"count": len(attachments), "messageID": msg.ID}).Infof("Found attachments.")
-
-				var attWg sync.WaitGroup
-				for _, att := range attachments {
-					attWg.Add(1)
-					go func(att o365client.Attachment) {
-						defer attWg.Done()
-						detailedAtt, err := o365Client.GetAttachmentDetails(ctx, mailboxName, msg.ID, att.ID)
-						if err != nil {
-							log.WithFields(log.Fields{"attachmentName": att.Name, "messageID": msg.ID, "error": err}).Error("Failed to get attachment details.")
-							return
-						}
-
-						log.WithFields(log.Fields{
-							"attachmentName":  detailedAtt.Name,
-							"messageID":       msg.ID,
-							"attachmentType":  detailedAtt.ODataType,
-							"hasDownloadURL":  detailedAtt.DownloadURL != "",
-							"hasContentBytes": detailedAtt.ContentBytes != "",
-						}).Debug("Processing attachment.")
-
-						if detailedAtt.DownloadURL != "" {
-							err = fileHandler.SaveAttachment(ctx, detailedAtt.Name, msg.ID, detailedAtt.DownloadURL, accessToken, detailedAtt.Size)
-						} else if detailedAtt.ContentBytes != "" {
-							err = fileHandler.SaveAttachmentFromBytes(detailedAtt.Name, msg.ID, detailedAtt.ContentBytes)
-						} else {
-							log.WithFields(log.Fields{"attachmentName": detailedAtt.Name, "messageID": msg.ID}).Warn("Skipping attachment: No download URL or content bytes.")
-							return
-						}
-						if err != nil {
-							log.WithFields(log.Fields{"attachmentName": att.Name, "messageID": msg.ID, "error": err}).Error("Failed to save attachment.")
-						}
-					}(att)
-				}
-				attWg.Wait()
-			}
-
-			mu.Lock()
-			if msg.ReceivedDateTime.After(newLatestMessage.ReceivedDateTime) || newLatestMessage.ID == "" {
-				newLatestMessage = msg
-			}
-			mu.Unlock()
-		}(msg)
-	}
-	wg.Wait()
-
-	if processingMode == "incremental" && newLatestMessage.ID != "" {
-		newState := &o365client.RunState{
-			LastRunTimestamp: newLatestMessage.ReceivedDateTime,
-			LastMessageID:    newLatestMessage.ID,
-		}
-		log.WithFields(log.Fields{
-			"timestamp": newState.LastRunTimestamp.Format(time.RFC3339Nano),
-			"messageID": newState.LastMessageID,
-		}).Debugln("Saving new state.")
-		if err := fileHandler.SaveState(newState, stateFilePath); err != nil {
-			log.Errorf("Error saving state file: %v", err)
-		}
-	}
-
-	log.Info("Application finished.")
+	return "", fmt.Errorf("internal error: no token source identified")
 }
 
-func runHealthCheckMode(ctx context.Context, client *o365client.O365Client, mailboxName string) {
+func isValidEmail(email string) bool {
+	emailRegex := regexp.MustCompile(`^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$`)
+	return emailRegex.MatchString(email)
+}
+
+func runHealthCheckMode(ctx context.Context, client o365client.O365ClientInterface, mailboxName string) {
 	log.WithField("mailbox", mailboxName).Info("Attempting to connect to mailbox and retrieve statistics...")
 	messageCount, err := client.GetMailboxStatistics(ctx, mailboxName)
 	if err != nil {
