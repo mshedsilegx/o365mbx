@@ -12,7 +12,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
-	"time"
 
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/time/rate"
