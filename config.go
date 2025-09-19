@@ -36,7 +36,7 @@ func (c *Config) SetDefaults() {
 		c.LargeAttachmentThresholdMB = 20
 	}
 	if c.ChunkSizeMB == 0 {
-		c.ChunkSizeMB = 4
+		c.ChunkSizeMB = 8
 	}
 	if c.MaxParallelDownloads == 0 {
 		c.MaxParallelDownloads = 10

@@ -96,6 +96,8 @@ func main() {
 	apiBurst := flag.Int("api-burst", 0, "API burst capacity for client-side rate limiting (default: 10)")
 	maxRetries := flag.Int("max-retries", 2, "Maximum number of retries for failed API calls.")
 	initialBackoffSeconds := flag.Int("initial-backoff-seconds", 5, "Initial backoff in seconds for retries.")
+	chunkSizeMB := flag.Int("chunk-size-mb", 8, "Chunk size in MB for large attachment downloads.")
+	largeAttachmentThresholdMB := flag.Int("large-attachment-threshold-mb", 20, "Threshold in MB for large attachments.")
 	displayVersion := flag.Bool("version", false, "Display application version")
 	healthCheck := flag.Bool("healthcheck", false, "Perform a health check on the mailbox and exit")
 	debug := flag.Bool("debug", false, "Enable debug logging")
@@ -138,6 +140,12 @@ func main() {
 	}
 	if *initialBackoffSeconds != 5 {
 		cfg.InitialBackoffSeconds = *initialBackoffSeconds
+	}
+	if *chunkSizeMB != 8 {
+		cfg.ChunkSizeMB = *chunkSizeMB
+	}
+	if *largeAttachmentThresholdMB != 20 {
+		cfg.LargeAttachmentThresholdMB = *largeAttachmentThresholdMB
 	}
 
 	if err := cfg.Validate(); err != nil {
