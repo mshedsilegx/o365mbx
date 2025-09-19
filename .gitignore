@@ -1,6 +1,7 @@
 *.bak_*
 COMMON.md
 GEMINI.md
+REVIEW.md
 build.sh
 
 # Go build artifacts
