@@ -45,7 +45,7 @@ type MessageState struct {
 }
 
 type DownloadState struct {
-	ExpectedAttachments int
+	ExpectedAttachments  int
 	CompletedAttachments int
 	Attachments          []filehandler.AttachmentMetadata
 	Mu                   sync.Mutex
