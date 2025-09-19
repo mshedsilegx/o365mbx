@@ -173,6 +173,58 @@ This example uses a `config.json` file but overrides the parallelism and rate li
     -api-burst 20
 ```
 
+### 4. Route Mode with Default Folders
+
+This example processes all messages from the "Inbox", saves the artifacts, and moves the original messages to either a "Processed" or "Error" folder in the mailbox.
+
+```shell
+./o365mbx \
+    -mailbox "user@example.com" \
+    -workspace "/path/to/your/output" \
+    -token-env \
+    -processing-mode route
+```
+
+### 5. Route Mode with Custom Folders
+
+This example does the same as above, but moves the messages to custom-named folders.
+
+```shell
+./o365mbx \
+    -mailbox "user@example.com" \
+    -workspace "/path/to/your/output" \
+    -token-env \
+    -processing-mode route \
+    -processed-folder "Archive/Succeeded" \
+    -error-folder "Archive/Failed"
+```
+
+### 6. High-Throughput Download
+
+This example configures the application for maximum download speed by increasing the number of parallel workers and raising the API rate limits.
+
+```shell
+./o365mbx \
+    -mailbox "user@example.com" \
+    -workspace "/path/to/your/output" \
+    -token-file "/path/to/token.txt" \
+    -parallel 30 \
+    -api-rate 15.0 \
+    -api-burst 30
+```
+
+### 7. Bandwidth-Limited Download
+
+This example throttles the total download speed to 50 MB/s to avoid hitting API data egress limits during a very large-scale download.
+
+```shell
+./o365mbx \
+    -mailbox "user@example.com" \
+    -workspace "/path/to/your/output" \
+    -token-file "/path/to/token.txt" \
+    -bandwidth-limit-mbs 50.0
+```
+
 ## License
 
 This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
