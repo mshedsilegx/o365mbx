@@ -34,6 +34,10 @@ type Config struct {
 
 	// State settings
 	StateSaveInterval int `json:"stateSaveInterval"`
+
+	// Conversion settings
+	ConvertBody  string `json:"convertBody,omitempty"`
+	ChromiumPath string `json:"chromiumPath,omitempty"`
 }
 
 // SetDefaults sets default values for the configuration parameters.
@@ -80,6 +84,9 @@ func (c *Config) SetDefaults() {
 	if c.InboxFolder == "" {
 		c.InboxFolder = "Inbox"
 	}
+	if c.ConvertBody == "" {
+		c.ConvertBody = "none"
+	}
 }
 
 // Validate checks if the configuration parameters are valid.
@@ -118,5 +125,17 @@ func (c *Config) Validate() error {
 	if c.ChunkSizeMB > c.LargeAttachmentThresholdMB {
 		return fmt.Errorf("chunkSizeMB (%d) cannot be greater than largeAttachmentThresholdMB (%d)", c.ChunkSizeMB, c.LargeAttachmentThresholdMB)
 	}
+
+	switch c.ConvertBody {
+	case "none", "text", "pdf":
+		// valid
+	default:
+		return fmt.Errorf("invalid convertBody value: %s. Must be one of 'none', 'text', or 'pdf'", c.ConvertBody)
+	}
+
+	if c.ConvertBody == "pdf" && c.ChromiumPath == "" {
+		return fmt.Errorf("chromiumPath must be set when convertBody is 'pdf'")
+	}
+
 	return nil
 }

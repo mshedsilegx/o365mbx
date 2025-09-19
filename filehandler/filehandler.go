@@ -68,10 +68,33 @@ func (fh *FileHandler) CreateWorkspace() error {
 }
 
 // SaveEmailBody saves the cleaned email body to a file.
-func (fh *FileHandler) SaveEmailBody(subject, messageID, bodyContent string) error {
-	fileName := fmt.Sprintf("%s_%s.txt", sanitizeFileName(subject), messageID)
+func (fh *FileHandler) SaveEmailBody(subject, messageID string, bodyContent interface{}, convertBody string) error {
+	var extension string
+	switch convertBody {
+	case "none":
+		extension = ".html"
+	case "text":
+		extension = ".txt"
+	case "pdf":
+		extension = ".pdf"
+	default:
+		return fmt.Errorf("invalid convertBody value: %s", convertBody)
+	}
+
+	fileName := fmt.Sprintf("%s_%s%s", sanitizeFileName(subject), messageID, extension)
 	filePath := filepath.Join(fh.workspacePath, fileName)
-	err := os.WriteFile(filePath, []byte(bodyContent), 0644)
+
+	var data []byte
+	switch content := bodyContent.(type) {
+	case string:
+		data = []byte(content)
+	case []byte:
+		data = content
+	default:
+		return fmt.Errorf("unsupported body content type: %T", bodyContent)
+	}
+
+	err := os.WriteFile(filePath, data, 0644)
 	if err != nil {
 		return &apperrors.FileSystemError{Path: filePath, Msg: "failed to save email body", Err: err}
 	}
