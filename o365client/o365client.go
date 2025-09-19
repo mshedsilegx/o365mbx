@@ -22,7 +22,7 @@ const graphAPIBaseURL = "https://graph.microsoft.com/v1.0"
 // O365ClientInterface defines the interface for O365Client methods used by other packages.
 type O365ClientInterface interface {
 	DoRequestWithRetry(req *http.Request) (*http.Response, error)
-	GetMessages(ctx context.Context, mailboxName string, state *RunState, messagesChan chan<- Message) error
+	GetMessages(ctx context.Context, mailboxName, sourceFolderID string, state *RunState, messagesChan chan<- Message) error
 	GetMailboxStatistics(ctx context.Context, mailboxName string) (int, error)
 	MoveMessage(ctx context.Context, mailboxName, messageID, destinationFolderID string) error
 	GetOrCreateFolderIDByName(ctx context.Context, mailboxName, folderName string) (string, error)
@@ -99,10 +99,10 @@ func (c *O365Client) DoRequestWithRetry(req *http.Request) (*http.Response, erro
 }
 
 // GetMessages fetches a list of messages for a given mailbox and streams them to a channel.
-func (c *O365Client) GetMessages(ctx context.Context, mailboxName string, state *RunState, messagesChan chan<- Message) error {
+func (c *O365Client) GetMessages(ctx context.Context, mailboxName, sourceFolderID string, state *RunState, messagesChan chan<- Message) error {
 	defer close(messagesChan) // Close the channel when the function finishes
 
-	baseURL, err := url.Parse(fmt.Sprintf("%s/users/%s/messages", graphAPIBaseURL, mailboxName))
+	baseURL, err := url.Parse(fmt.Sprintf("%s/users/%s/mailFolders/%s/messages", graphAPIBaseURL, mailboxName, sourceFolderID))
 	if err != nil {
 		return fmt.Errorf("failed to parse base URL: %w", err)
 	}

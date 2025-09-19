@@ -19,6 +19,7 @@ type Config struct {
 	DebugLogging    bool   `json:"debugLogging,omitempty"`
 	ProcessingMode  string `json:"processingMode,omitempty"`
 	StateFilePath   string `json:"stateFilePath,omitempty"`
+	InboxFolder     string `json:"inboxFolder,omitempty"`
 	ProcessedFolder string `json:"processedFolder,omitempty"`
 	ErrorFolder     string `json:"errorFolder,omitempty"`
 
@@ -75,10 +76,13 @@ func (c *Config) SetDefaults() {
 		c.ProcessingMode = "full" // Default: full processing
 	}
 	if c.ProcessedFolder == "" {
-		c.ProcessedFolder = "processed"
+		c.ProcessedFolder = "Processed"
 	}
 	if c.ErrorFolder == "" {
-		c.ErrorFolder = "error"
+		c.ErrorFolder = "Error"
+	}
+	if c.InboxFolder == "" {
+		c.InboxFolder = "Inbox"
 	}
 }
 

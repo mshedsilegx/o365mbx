@@ -105,8 +105,9 @@ func main() {
 	debug := flag.Bool("debug", false, "Enable debug logging")
 	processingMode := flag.String("processing-mode", "full", "Processing mode: 'full' or 'incremental'")
 	stateFilePath := flag.String("state", "", "Path to the state file for incremental processing")
-	processedFolder := flag.String("processed-folder", "processed", "Destination folder for successfully processed messages in route mode.")
-	errorFolder := flag.String("error-folder", "error", "Destination folder for messages that failed processing in route mode.")
+	processedFolder := flag.String("processed-folder", "Processed", "Destination folder for successfully processed messages in route mode.")
+	errorFolder := flag.String("error-folder", "Error", "Destination folder for messages that failed processing in route mode.")
+	inboxFolder := flag.String("inbox-folder", "Inbox", "The source folder from which to process messages.")
 	flag.Parse()
 
 	log.SetFormatter(&log.TextFormatter{FullTimestamp: true})
@@ -168,6 +169,8 @@ func main() {
 			cfg.ProcessedFolder = *processedFolder
 		case "error-folder":
 			cfg.ErrorFolder = *errorFolder
+		case "inbox-folder":
+			cfg.InboxFolder = *inboxFolder
 		}
 	})
 
@@ -249,11 +252,21 @@ func runRouteMode(ctx context.Context, cfg *Config, o365Client o365client.O365Cl
 	var producerWg, workerWg sync.WaitGroup
 	semaphore := make(chan struct{}, cfg.MaxParallelDownloads)
 
+	// Get source folder ID
+	sourceFolderID := cfg.InboxFolder
+	if strings.ToLower(sourceFolderID) != "inbox" {
+		var err error
+		sourceFolderID, err = o365Client.GetOrCreateFolderIDByName(ctx, mailboxName, cfg.InboxFolder)
+		if err != nil {
+			log.Fatalf("Failed to get or create source folder '%s': %v", cfg.InboxFolder, err)
+		}
+	}
+
 	// Producer to fetch all messages
 	producerWg.Add(1)
 	go func() {
 		defer producerWg.Done()
-		if err := o365Client.GetMessages(ctx, mailboxName, state, messagesChan); err != nil {
+		if err := o365Client.GetMessages(ctx, mailboxName, sourceFolderID, state, messagesChan); err != nil {
 			log.Fatalf("O365 API error fetching messages for routing: %v", err)
 		}
 	}()
@@ -456,11 +469,21 @@ func runDownloadMode(ctx context.Context, cfg *Config, accessToken, mailboxName,
 	// Shared semaphore for all API-bound workers
 	semaphore := make(chan struct{}, cfg.MaxParallelDownloads)
 
+	// Get source folder ID
+	sourceFolderID := cfg.InboxFolder
+	if strings.ToLower(sourceFolderID) != "inbox" {
+		var err error
+		sourceFolderID, err = o365Client.GetOrCreateFolderIDByName(ctx, mailboxName, cfg.InboxFolder)
+		if err != nil {
+			log.Fatalf("Failed to get or create source folder '%s': %v", cfg.InboxFolder, err)
+		}
+	}
+
 	// --- Producer ---
 	producerWg.Add(1)
 	go func() {
 		defer producerWg.Done()
-		err := o365Client.GetMessages(ctx, mailboxName, state, messagesChan)
+		err := o365Client.GetMessages(ctx, mailboxName, sourceFolderID, state, messagesChan)
 		if err != nil {
 			log.Fatalf("O365 API error fetching messages: %v", err)
 		}

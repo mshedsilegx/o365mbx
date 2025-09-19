@@ -52,10 +52,11 @@ All configuration options can be controlled via command-line arguments. Any flag
 | `-version`                      | Display the application version and exit.                                 | No       | `false` |
 | **Processing & State**          |                                                                           |          |         |
 | `-processing-mode`              | Processing mode: `full`, `incremental`, or `route`.                       | No       | `full`  |
+| `-inbox-folder`                 | The source folder from which to process messages.                         | No       | `Inbox` |
 | `-state`                        | Path to the state file for incremental processing.                        | No       |         |
 | `-state-save-interval`          | Save state every N messages during a run.                                 | No       | `100`   |
-| `-processed-folder`             | Destination folder for successful messages in `route` mode.               | No       | `processed`|
-| `-error-folder`                 | Destination folder for failed messages in `route` mode.                   | No       | `error` |
+| `-processed-folder`             | Destination folder for successful messages in `route` mode.               | No       | `Processed`|
+| `-error-folder`                 | Destination folder for failed messages in `route` mode.                   | No       | `Error` |
 | **Performance & Limits**        |                                                                           |          |         |
 | `-parallel`                     | Maximum number of parallel workers.                                       | No       | `10`    |
 | `-timeout`                      | HTTP client timeout in seconds.                                           | No       | `120`   |
@@ -81,6 +82,7 @@ For a more permanent setup, you can use a JSON file (e.g., `config.json`) and pa
   "debugLogging": false,
   "processingMode": "route",
   "stateFilePath": "/path/to/your/state.json",
+  "inboxFolder": "Inbox",
   "processedFolder": "Processed-Archive",
   "errorFolder": "Error-Items",
   "httpClientTimeoutSeconds": 180,
@@ -106,6 +108,7 @@ For a more permanent setup, you can use a JSON file (e.g., `config.json`) and pa
 *   **General**:
     *   `debugLogging`: (Boolean) Enables debug-level logging.
     *   `processingMode`: (String) `full`, `incremental`, or `route`. In `route` mode, messages are moved after processing.
+    *   `inboxFolder`: (String) The source folder to process messages from. Defaults to the main `Inbox`.
     *   `stateFilePath`: (String) Absolute path to the state file for incremental mode.
     *   `processedFolder`: (String) The destination folder for successfully processed messages in `route` mode.
     *   `errorFolder`: (String) The destination folder for messages that failed processing in `route` mode.
@@ -158,14 +161,6 @@ This example uses a `config.json` file but overrides the parallelism and rate li
     -parallel 20 \
     -api-rate 10.0 \
     -api-burst 20
-```
-
-## Building from Source
-
-To build the application from source, you need to have Go installed. You can build it using the following command, which also embeds the version number:
-
-```shell
-go build -ldflags "-s -w -X main.version=$(cat version.txt)" -o o365mbx
 ```
 
 ## License
