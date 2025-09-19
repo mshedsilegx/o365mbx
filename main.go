@@ -10,6 +10,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -110,19 +111,6 @@ func main() {
 	inboxFolder := flag.String("inbox-folder", "Inbox", "The source folder from which to process messages.")
 	flag.Parse()
 
-	log.SetFormatter(&log.TextFormatter{FullTimestamp: true})
-	if cfg.DebugLogging {
-		log.SetLevel(log.DebugLevel)
-		log.Debugln("Debug logging enabled.")
-	} else {
-		log.SetLevel(log.InfoLevel)
-	}
-
-	if *displayVersion {
-		fmt.Printf("O365 Mailbox Downloader Version: %s\n", version)
-		os.Exit(0)
-	}
-
 	cfg, err := LoadConfig(*configPath)
 	if err != nil {
 		log.Fatalf("Error loading configuration: %v", err)
@@ -174,8 +162,21 @@ func main() {
 		}
 	})
 
+	log.SetFormatter(&log.TextFormatter{FullTimestamp: true})
+	if cfg.DebugLogging {
+		log.SetLevel(log.DebugLevel)
+		log.Debugln("Debug logging enabled.")
+	} else {
+		log.SetLevel(log.InfoLevel)
+	}
+
 	if err := cfg.Validate(); err != nil {
 		log.Fatalf("Invalid configuration: %v", err)
+	}
+
+	if *displayVersion {
+		fmt.Printf("O365 Mailbox Downloader Version: %s\n", version)
+		os.Exit(0)
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
