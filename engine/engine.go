@@ -37,9 +37,9 @@ type ProcessingResult struct {
 }
 
 type MessageState struct {
-	ExpectedTasks int
+	ExpectedTasks  int
 	CompletedTasks int
-	HasFailed     bool
+	HasFailed      bool
 }
 
 func RunEngine(ctx context.Context, cfg *Config, o365Client o365client.O365ClientInterface, emailProcessor *emailprocessor.EmailProcessor, fileHandler *filehandler.FileHandler, accessToken, mailboxName, workspacePath, version string) {

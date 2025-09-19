@@ -60,26 +60,46 @@ func main() {
 
 	flag.Visit(func(f *flag.Flag) {
 		switch f.Name {
-		case "token-string": cfg.TokenString = *tokenString
-		case "token-file": cfg.TokenFile = *tokenFile
-		case "token-env": cfg.TokenEnv = *tokenEnv
-		case "remove-token-file": cfg.RemoveTokenFile = *removeTokenFile
-		case "debug": cfg.DebugLogging = *debug
-		case "processing-mode": cfg.ProcessingMode = *processingMode
-		case "inbox-folder": cfg.InboxFolder = *inboxFolder
-		case "state": cfg.StateFilePath = *stateFilePath
-		case "processed-folder": cfg.ProcessedFolder = *processedFolder
-		case "error-folder": cfg.ErrorFolder = *errorFolder
-		case "timeout": cfg.HTTPClientTimeoutSeconds = *timeoutSeconds
-		case "parallel": cfg.MaxParallelDownloads = *maxParallelDownloads
-		case "api-rate": cfg.APICallsPerSecond = *apiCallsPerSecond
-		case "api-burst": cfg.APIBurst = *apiBurst
-		case "max-retries": cfg.MaxRetries = *maxRetries
-		case "initial-backoff-seconds": cfg.InitialBackoffSeconds = *initialBackoffSeconds
-		case "chunk-size-mb": cfg.ChunkSizeMB = *chunkSizeMB
-		case "large-attachment-threshold-mb": cfg.LargeAttachmentThresholdMB = *largeAttachmentThresholdMB
-		case "state-save-interval": cfg.StateSaveInterval = *stateSaveInterval
-		case "bandwidth-limit-mbs": cfg.BandwidthLimitMBs = *bandwidthLimitMBs
+		case "token-string":
+			cfg.TokenString = *tokenString
+		case "token-file":
+			cfg.TokenFile = *tokenFile
+		case "token-env":
+			cfg.TokenEnv = *tokenEnv
+		case "remove-token-file":
+			cfg.RemoveTokenFile = *removeTokenFile
+		case "debug":
+			cfg.DebugLogging = *debug
+		case "processing-mode":
+			cfg.ProcessingMode = *processingMode
+		case "inbox-folder":
+			cfg.InboxFolder = *inboxFolder
+		case "state":
+			cfg.StateFilePath = *stateFilePath
+		case "processed-folder":
+			cfg.ProcessedFolder = *processedFolder
+		case "error-folder":
+			cfg.ErrorFolder = *errorFolder
+		case "timeout":
+			cfg.HTTPClientTimeoutSeconds = *timeoutSeconds
+		case "parallel":
+			cfg.MaxParallelDownloads = *maxParallelDownloads
+		case "api-rate":
+			cfg.APICallsPerSecond = *apiCallsPerSecond
+		case "api-burst":
+			cfg.APIBurst = *apiBurst
+		case "max-retries":
+			cfg.MaxRetries = *maxRetries
+		case "initial-backoff-seconds":
+			cfg.InitialBackoffSeconds = *initialBackoffSeconds
+		case "chunk-size-mb":
+			cfg.ChunkSizeMB = *chunkSizeMB
+		case "large-attachment-threshold-mb":
+			cfg.LargeAttachmentThresholdMB = *largeAttachmentThresholdMB
+		case "state-save-interval":
+			cfg.StateSaveInterval = *stateSaveInterval
+		case "bandwidth-limit-mbs":
+			cfg.BandwidthLimitMBs = *bandwidthLimitMBs
 		}
 	})
 
@@ -164,9 +184,15 @@ func main() {
 
 func loadAccessToken(cfg *engine.Config) (string, error) {
 	sourceCount := 0
-	if cfg.TokenString != "" { sourceCount++ }
-	if cfg.TokenFile != "" { sourceCount++ }
-	if cfg.TokenEnv { sourceCount++ }
+	if cfg.TokenString != "" {
+		sourceCount++
+	}
+	if cfg.TokenFile != "" {
+		sourceCount++
+	}
+	if cfg.TokenEnv {
+		sourceCount++
+	}
 
 	if sourceCount == 0 {
 		return "", fmt.Errorf("no token source specified. Please use one of -token-string, -token-file, or -token-env (or their config file equivalents)")

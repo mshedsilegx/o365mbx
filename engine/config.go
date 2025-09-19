@@ -20,12 +20,12 @@ type Config struct {
 	ErrorFolder     string `json:"errorFolder,omitempty"`
 
 	// HTTP and API settings
-	HTTPClientTimeoutSeconds   int     `json:"httpClientTimeoutSeconds"`
-	MaxRetries                 int     `json:"maxRetries"`
-	InitialBackoffSeconds      int     `json:"initialBackoffSeconds"`
-	MaxParallelDownloads       int     `json:"maxParallelDownloads"`
-	APICallsPerSecond          float64 `json:"apiCallsPerSecond"`
-	APIBurst                   int     `json:"apiBurst"`
+	HTTPClientTimeoutSeconds int     `json:"httpClientTimeoutSeconds"`
+	MaxRetries               int     `json:"maxRetries"`
+	InitialBackoffSeconds    int     `json:"initialBackoffSeconds"`
+	MaxParallelDownloads     int     `json:"maxParallelDownloads"`
+	APICallsPerSecond        float64 `json:"apiCallsPerSecond"`
+	APIBurst                 int     `json:"apiBurst"`
 
 	// Attachment settings
 	LargeAttachmentThresholdMB int     `json:"largeAttachmentThresholdMB"`
@@ -33,7 +33,7 @@ type Config struct {
 	BandwidthLimitMBs          float64 `json:"bandwidthLimitMBs"`
 
 	// State settings
-	StateSaveInterval          int     `json:"stateSaveInterval"`
+	StateSaveInterval int `json:"stateSaveInterval"`
 }
 
 // SetDefaults sets default values for the configuration parameters.
