@@ -112,6 +112,8 @@ func (c *O365Client) GetMessages(ctx context.Context, mailboxName, sourceFolderI
 	params.Add("$orderby", "receivedDateTime asc, id asc")
 	// Use $expand to fetch attachments along with the message data in a single call.
 	params.Add("$expand", "attachments")
+	// Use $select to specify exact fields, including To, From, and CC recipients.
+	params.Add("$select", "id,subject,receivedDateTime,body,hasAttachments,from,toRecipients,ccRecipients")
 
 	// If a timestamp is available from a previous run, use it to filter.
 	if !state.LastRunTimestamp.IsZero() {
@@ -327,6 +329,17 @@ func (c *O365Client) GetMailboxStatistics(ctx context.Context, mailboxName strin
 	return response.OdataCount, nil
 }
 
+// EmailAddress represents the email address of a user.
+type EmailAddress struct {
+	Name    string `json:"name"`
+	Address string `json:"address"`
+}
+
+// Recipient represents a sender or receiver of a message.
+type Recipient struct {
+	EmailAddress EmailAddress `json:"emailAddress"`
+}
+
 // Message represents an email message from O365
 type Message struct {
 	ID               string    `json:"id"`
@@ -338,6 +351,9 @@ type Message struct {
 	} `json:"body"`
 	HasAttachments bool         `json:"hasAttachments"`
 	Attachments    []Attachment `json:"attachments"`
+	From           Recipient    `json:"from"`
+	ToRecipients   []Recipient  `json:"toRecipients"`
+	CcRecipients   []Recipient  `json:"ccRecipients"`
 }
 
 // Attachment represents an attachment from O365

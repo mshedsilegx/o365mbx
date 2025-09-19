@@ -20,6 +20,98 @@ It is designed for high-performance, parallelized downloading and is robust and 
 *   **Health Check Mode**: Provides a "health check" mode to verify connectivity and authentication with the O365 mailbox without performing a full download.
 *   **Structured Logging**: Uses `logrus` for structured and informative logging, with a configurable debug level.
 
+## Workspace Directory Structure
+
+The application saves each email into a dedicated folder within the specified workspace. The folder is named after the message's unique ID. Here is an example of the directory structure for a single downloaded email:
+
+```
+/path/to/your/workspace/
+└── AAMkAGI0ZD... (message ID)
+    ├── attachments
+    │   ├── 01_quarterly_report.pdf
+    │   └── 02_logo.png
+    ├── body.html
+    └── metadata.json
+```
+
+*   **`metadata.json`**: A JSON file containing detailed metadata about the email, including sender, recipients, subject, date, and information about the attachments.
+*   **`body.html` / `body.txt`**: The body of the email. The extension depends on the original content type or the conversion option specified.
+*   **`attachments/`**: A sub-directory containing all attachments from the email. Each attachment is prefixed with a two-digit sequence number.
+
+## Metadata JSON Specifications
+
+The `metadata.json` file provides a detailed overview of the downloaded email.
+
+### Field Descriptions
+
+*   **`to`**: A list of recipients in the "To" field. Each recipient object contains an `emailAddress` object with `name` and `address`.
+*   **`cc`**: A list of recipients in the "Cc" field. Same structure as `to`.
+*   **`from`**: The sender of the email. Same structure as a recipient object.
+*   **`subject`**: The subject line of the email.
+*   **`received_date`**: The date and time the email was received, in ISO 8601 format (UTC).
+*   **`body`**: The filename of the email body (e.g., `body.html`, `body.txt` or `body.pdf`).
+*   **`content_type_of_body`**: The content type of the saved body file (`text/html`, `text/plain`, or `application/pdf`).
+*   **`attachment_counts`**: The total number of attachments in the email.
+*   **`list_of_attachments`**: A list of objects, where each object represents an attachment and contains the following fields:
+    *   `attachment_name_in_message`: The original filename of the attachment.
+    *   `content_type_of_attachment`: The MIME type of the attachment.
+    *   `size_of_attachment_in_bytes`: The size of the attachment in bytes.
+    *   `attachment_name_stored_after_download`: The filename used to save the attachment in the `attachments` folder (e.g., `01_report.pdf`).
+
+### Example `metadata.json`
+
+```json
+{
+  "to": [
+    {
+      "emailAddress": {
+        "name": "Jane Doe",
+        "address": "jane.doe@example.com"
+      }
+    }
+  ],
+  "cc": [
+    {
+      "emailAddress": {
+        "name": "John Smith",
+        "address": "john.smith@example.com"
+      }
+    }
+  ],
+  "from": {
+    "emailAddress": {
+      "name": "Marketing Team",
+      "address": "marketing@example.com"
+    }
+  },
+  "subject": "Q3 Financial Report and Project Updates",
+  "received_date": "2024-07-21T14:30:00Z",
+  "body": "body.html",
+  "content_type_of_body": "text/html",
+  "attachment_counts": 3,
+  "list_of_attachments": [
+    {
+      "attachment_name_in_message": "Q3_Financials.xlsx",
+      "content_type_of_attachment": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "size_of_attachment_in_bytes": 123456,
+      "attachment_name_stored_after_download": "01_Q3_Financials.xlsx"
+    },
+    {
+      "attachment_name_in_message": "Project_Timeline.pdf",
+      "content_type_of_attachment": "application/pdf",
+      "size_of_attachment_in_bytes": 789012,
+      "attachment_name_stored_after_download": "02_Project_Timeline.pdf"
+    },
+    {
+      "attachment_name_in_message": "company_logo.png",
+      "content_type_of_attachment": "image/png",
+      "size_of_attachment_in_bytes": 34567,
+      "attachment_name_stored_after_download": "03_company_logo.png"
+    }
+  ]
+}
+```
+
 ## Token Management
 
 The application requires a valid JWT access token for the Microsoft Graph API. You must provide the token using **exactly one** of the following methods:
@@ -39,8 +131,8 @@ All configuration options can be controlled via command-line arguments. Any flag
 | Argument                        | Description                                                               | Required | Default |
 | ------------------------------- | ------------------------------------------------------------------------- | -------- | ------- |
 | **Required**                    |                                                                           |          |         |
-| `-mailbox`                      | The email address of the mailbox to download.                             | **Yes**  |         |
-| `-workspace`                    | The absolute path to a unique folder for storing downloaded artifacts.    | **Yes**  |         |
+| `-mailbox`                      | The email address of the mailbox to download. Can also be set in config.  | **Yes**  |         |
+| `-workspace`                    | The absolute path for storing artifacts. Can also be set in config.       | **Yes**  |         |
 | **Token (Choose One)**          |                                                                           | **Yes**  |         |
 | `-token-string`                 | JWT token as a string.                                                    |          |         |
 | `-token-file`                   | Path to a file containing the JWT token.                                  |          |         |
@@ -81,6 +173,8 @@ For a more permanent setup, you can use a JSON file (e.g., `config.json`) and pa
 
 ```json
 {
+  "mailboxName": "user@example.com",
+  "workspacePath": "/path/to/your/output",
   "tokenString": "your-jwt-token-here",
   "debugLogging": false,
   "processingMode": "route",
@@ -103,6 +197,9 @@ For a more permanent setup, you can use a JSON file (e.g., `config.json`) and pa
 
 ### Configuration Directives
 
+*   **Required**:
+    *   `mailboxName`: (String) The email address of the mailbox to download.
+    *   `workspacePath`: (String) The absolute path to a unique folder for storing downloaded artifacts.
 *   **Token Management**:
     *   `tokenString`: (String) The JWT token.
     *   `tokenFile`: (String) Path to the token file.
@@ -219,12 +316,16 @@ This example configures the application for maximum download speed by increasing
 
 This example throttles the total download speed to 50 MB/s to avoid hitting API data egress limits during a very large-scale download.
 
+### 8. Body Conversion to Plain Text
+
+This example downloads all emails and converts their bodies from HTML to plain text.
+
 ```shell
 ./o365mbx \
     -mailbox "user@example.com" \
     -workspace "/path/to/your/output" \
     -token-file "/path/to/token.txt" \
-    -bandwidth-limit-mbs 50.0
+    -convert-body text
 ```
 
 ## License

@@ -5,6 +5,10 @@ import (
 )
 
 type Config struct {
+	// Required settings
+	MailboxName   string `json:"mailboxName,omitempty"`
+	WorkspacePath string `json:"workspacePath,omitempty"`
+
 	// Token settings
 	TokenString     string `json:"tokenString,omitempty"`
 	TokenFile       string `json:"tokenFile,omitempty"`

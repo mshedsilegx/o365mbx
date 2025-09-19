@@ -2,3 +2,8 @@
 COMMON.md
 GEMINI.md
 build.sh
+
+# Go build artifacts
+o365mbx
+*.exe
+*.test
