@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -230,11 +231,13 @@ func (fh *FileHandler) SaveAttachment(ctx context.Context, msgPath string, att o
 
 		resp, err := fh.o365Client.DoRequestWithRetry(req)
 		if err != nil {
-			// Error already wrapped by DoRequestWithRetry, just check for specific types
-			if apiErr, ok := err.(*apperrors.APIError); ok {
+			// Error already wrapped by DoRequestWithRetry, check for specific types
+			var apiErr *apperrors.APIError
+			var authErr *apperrors.AuthError
+			if errors.As(err, &apiErr) {
 				return nil, apiErr
 			}
-			if authErr, ok := err.(*apperrors.AuthError); ok {
+			if errors.As(err, &authErr) {
 				return nil, authErr
 			}
 			return nil, fmt.Errorf("failed to download attachment from %s: %w", att.DownloadURL, err)
@@ -284,10 +287,12 @@ func (fh *FileHandler) SaveAttachment(ctx context.Context, msgPath string, att o
 
 			resp, err := fh.o365Client.DoRequestWithRetry(req)
 			if err != nil {
-				if apiErr, ok := err.(*apperrors.APIError); ok {
+				var apiErr *apperrors.APIError
+				var authErr *apperrors.AuthError
+				if errors.As(err, &apiErr) {
 					return nil, apiErr
 				}
-				if authErr, ok := err.(*apperrors.AuthError); ok {
+				if errors.As(err, &authErr) {
 					return nil, authErr
 				}
 				return nil, fmt.Errorf("failed to download attachment chunk from %s (range %d-%d): %w", att.DownloadURL, downloadedBytes, endByte, err)
