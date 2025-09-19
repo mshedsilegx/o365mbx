@@ -98,6 +98,8 @@ func main() {
 	initialBackoffSeconds := flag.Int("initial-backoff-seconds", 5, "Initial backoff in seconds for retries.")
 	chunkSizeMB := flag.Int("chunk-size-mb", 8, "Chunk size in MB for large attachment downloads.")
 	largeAttachmentThresholdMB := flag.Int("large-attachment-threshold-mb", 20, "Threshold in MB for large attachments.")
+	stateSaveInterval := flag.Int("state-save-interval", 100, "Save state every N messages.")
+	bandwidthLimitMBs := flag.Float64("bandwidth-limit-mbs", 0, "Bandwidth limit in MB/s for downloads (0 for disabled).")
 	displayVersion := flag.Bool("version", false, "Display application version")
 	healthCheck := flag.Bool("healthcheck", false, "Perform a health check on the mailbox and exit")
 	debug := flag.Bool("debug", false, "Enable debug logging")
@@ -106,7 +108,7 @@ func main() {
 	flag.Parse()
 
 	log.SetFormatter(&log.TextFormatter{FullTimestamp: true})
-	if *debug {
+	if cfg.DebugLogging {
 		log.SetLevel(log.DebugLevel)
 		log.Debugln("Debug logging enabled.")
 	} else {
@@ -123,30 +125,45 @@ func main() {
 		log.Fatalf("Error loading configuration: %v", err)
 	}
 
-	if *timeoutSeconds != 120 {
-		cfg.HTTPClientTimeoutSeconds = *timeoutSeconds
-	}
-	if *maxParallelDownloads != 10 {
-		cfg.MaxParallelDownloads = *maxParallelDownloads
-	}
-	if *apiCallsPerSecond != 0 {
-		cfg.APICallsPerSecond = *apiCallsPerSecond
-	}
-	if *apiBurst != 0 {
-		cfg.APIBurst = *apiBurst
-	}
-	if *maxRetries != 2 {
-		cfg.MaxRetries = *maxRetries
-	}
-	if *initialBackoffSeconds != 5 {
-		cfg.InitialBackoffSeconds = *initialBackoffSeconds
-	}
-	if *chunkSizeMB != 8 {
-		cfg.ChunkSizeMB = *chunkSizeMB
-	}
-	if *largeAttachmentThresholdMB != 20 {
-		cfg.LargeAttachmentThresholdMB = *largeAttachmentThresholdMB
-	}
+	// Override config with flags if they were explicitly set
+	flag.Visit(func(f *flag.Flag) {
+		switch f.Name {
+		case "token-string":
+			cfg.TokenString = *tokenString
+		case "token-file":
+			cfg.TokenFile = *tokenFile
+		case "token-env":
+			cfg.TokenEnv = *tokenEnv
+		case "remove-token-file":
+			cfg.RemoveTokenFile = *removeTokenFile
+		case "debug":
+			cfg.DebugLogging = *debug
+		case "processing-mode":
+			cfg.ProcessingMode = *processingMode
+		case "state":
+			cfg.StateFilePath = *stateFilePath
+		case "timeout":
+			cfg.HTTPClientTimeoutSeconds = *timeoutSeconds
+		case "parallel":
+			cfg.MaxParallelDownloads = *maxParallelDownloads
+		case "api-rate":
+			cfg.APICallsPerSecond = *apiCallsPerSecond
+		case "api-burst":
+			cfg.APIBurst = *apiBurst
+		case "max-retries":
+			cfg.MaxRetries = *maxRetries
+		case "initial-backoff-seconds":
+			cfg.InitialBackoffSeconds = *initialBackoffSeconds
+		case "chunk-size-mb":
+			cfg.ChunkSizeMB = *chunkSizeMB
+		case "large-attachment-threshold-mb":
+			cfg.LargeAttachmentThresholdMB = *largeAttachmentThresholdMB
+		case "state-save-interval":
+			cfg.StateSaveInterval = *stateSaveInterval
+		case "bandwidth-limit-mbs":
+			cfg.BandwidthLimitMBs = *bandwidthLimitMBs
+		}
+	})
 
 	if err := cfg.Validate(); err != nil {
 		log.Fatalf("Invalid configuration: %v", err)
@@ -162,7 +179,7 @@ func main() {
 		cancel()
 	}()
 
-	accessToken, err := loadAccessToken(*tokenString, *tokenFile, *tokenEnv)
+	accessToken, err := loadAccessToken(cfg)
 	if err != nil {
 		log.Fatalf("Error loading access token: %v", err)
 	}
@@ -188,57 +205,57 @@ func main() {
 
 	// Defer the token file removal if requested
 	defer func() {
-		if *tokenFile != "" && *removeTokenFile {
-			log.WithField("file", *tokenFile).Info("Removing token file as requested.")
-			if err := os.Remove(*tokenFile); err != nil {
-				log.WithField("file", *tokenFile).Errorf("Failed to remove token file: %v", err)
+		if cfg.TokenFile != "" && cfg.RemoveTokenFile {
+			log.WithField("file", cfg.TokenFile).Info("Removing token file as requested.")
+			if err := os.Remove(cfg.TokenFile); err != nil {
+				log.WithField("file", cfg.TokenFile).Errorf("Failed to remove token file: %v", err)
 			}
 		}
 	}()
 
-	runDownloadMode(ctx, cfg, accessToken, *mailboxName, *workspacePath, *processingMode, *stateFilePath, rng)
+	runDownloadMode(ctx, cfg, accessToken, *mailboxName, *workspacePath, rng)
 }
 
-func loadAccessToken(tokenString, tokenFile string, tokenEnv bool) (string, error) {
+func loadAccessToken(cfg *Config) (string, error) {
 	// Validate that exactly one token source is specified
 	sourceCount := 0
-	if tokenString != "" {
+	if cfg.TokenString != "" {
 		sourceCount++
 	}
-	if tokenFile != "" {
+	if cfg.TokenFile != "" {
 		sourceCount++
 	}
-	if tokenEnv {
+	if cfg.TokenEnv {
 		sourceCount++
 	}
 
 	if sourceCount == 0 {
-		return "", fmt.Errorf("no token source specified. Please use one of -token-string, -token-file, or -token-env")
+		return "", fmt.Errorf("no token source specified. Please use one of -token-string, -token-file, or -token-env (or their config file equivalents)")
 	}
 	if sourceCount > 1 {
-		return "", fmt.Errorf("multiple token sources specified. Please use only one of -token-string, -token-file, or -token-env")
+		return "", fmt.Errorf("multiple token sources specified. Please use only one of -token-string, -token-file, or -token-env (or their config file equivalents)")
 	}
 
 	// Load token from the specified source
-	if tokenString != "" {
-		log.Info("Using token from -token-string flag.")
-		return tokenString, nil
+	if cfg.TokenString != "" {
+		log.Info("Using token from tokenString.")
+		return cfg.TokenString, nil
 	}
 
-	if tokenFile != "" {
-		log.Info("Using token from file specified by -token-file.")
-		content, err := os.ReadFile(tokenFile)
+	if cfg.TokenFile != "" {
+		log.Info("Using token from tokenFile.")
+		content, err := os.ReadFile(cfg.TokenFile)
 		if err != nil {
-			return "", fmt.Errorf("failed to read token file %s: %w", tokenFile, err)
+			return "", fmt.Errorf("failed to read token file %s: %w", cfg.TokenFile, err)
 		}
 		return strings.TrimSpace(string(content)), nil
 	}
 
-	if tokenEnv {
+	if cfg.TokenEnv {
 		log.Info("Using token from JWT_TOKEN environment variable.")
 		token := os.Getenv("JWT_TOKEN")
 		if token == "" {
-			return "", fmt.Errorf("-token-env specified, but JWT_TOKEN environment variable is not set")
+			return "", fmt.Errorf("tokenEnv specified, but JWT_TOKEN environment variable is not set")
 		}
 		return token, nil
 	}
@@ -258,7 +275,7 @@ type RunStats struct {
 	nonFatalErrors       uint32
 }
 
-func runDownloadMode(ctx context.Context, cfg *Config, accessToken, mailboxName, workspacePath, processingMode, stateFilePath string, rng *rand.Rand) {
+func runDownloadMode(ctx context.Context, cfg *Config, accessToken, mailboxName, workspacePath string, rng *rand.Rand) {
 	stats := &RunStats{}
 	startTime := time.Now()
 
@@ -291,8 +308,8 @@ func runDownloadMode(ctx context.Context, cfg *Config, accessToken, mailboxName,
 
 	var state *o365client.RunState
 	var err error
-	if processingMode == "incremental" {
-		state, err = fileHandler.LoadState(stateFilePath)
+	if cfg.ProcessingMode == "incremental" {
+		state, err = fileHandler.LoadState(cfg.StateFilePath)
 		if err != nil {
 			log.Fatalf("Error loading state file: %v", err)
 		}
@@ -370,7 +387,7 @@ func runDownloadMode(ctx context.Context, cfg *Config, accessToken, mailboxName,
 				processedCount := atomic.LoadUint32(&stats.messagesProcessed)
 				if processedCount%uint32(cfg.StateSaveInterval) == 0 {
 					log.WithField("messageCount", processedCount).Info("Periodically saving state.")
-					if err := fileHandler.SaveState(&o365client.RunState{LastRunTimestamp: newLatestMessage.ReceivedDateTime, LastMessageID: newLatestMessage.ID}, stateFilePath); err != nil {
+					if err := fileHandler.SaveState(&o365client.RunState{LastRunTimestamp: newLatestMessage.ReceivedDateTime, LastMessageID: newLatestMessage.ID}, cfg.StateFilePath); err != nil {
 						log.WithField("error", err).Error("Failed to periodically save state.")
 					}
 				}
@@ -426,7 +443,7 @@ func runDownloadMode(ctx context.Context, cfg *Config, accessToken, mailboxName,
 	// Wait for downloaders to finish
 	downloaderWg.Wait()
 
-	if processingMode == "incremental" && newLatestMessage.ID != "" {
+	if cfg.ProcessingMode == "incremental" && newLatestMessage.ID != "" {
 		newState := &o365client.RunState{
 			LastRunTimestamp: newLatestMessage.ReceivedDateTime,
 			LastMessageID:    newLatestMessage.ID,
@@ -435,7 +452,7 @@ func runDownloadMode(ctx context.Context, cfg *Config, accessToken, mailboxName,
 			"timestamp": newState.LastRunTimestamp.Format(time.RFC3339Nano),
 			"messageID": newState.LastMessageID,
 		}).Debugln("Saving new state.")
-		if err := fileHandler.SaveState(newState, stateFilePath); err != nil {
+		if err := fileHandler.SaveState(newState, cfg.StateFilePath); err != nil {
 			log.Errorf("Error saving state file: %v", err)
 		}
 	}

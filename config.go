@@ -9,16 +9,32 @@ import (
 )
 
 type Config struct {
+	// Token settings
+	TokenString     string `json:"tokenString,omitempty"`
+	TokenFile       string `json:"tokenFile,omitempty"`
+	TokenEnv        bool   `json:"tokenEnv,omitempty"`
+	RemoveTokenFile bool   `json:"removeTokenFile,omitempty"`
+
+	// General settings
+	DebugLogging bool   `json:"debugLogging,omitempty"`
+	ProcessingMode string `json:"processingMode,omitempty"`
+	StateFilePath  string `json:"stateFilePath,omitempty"`
+
+	// HTTP and API settings
 	HTTPClientTimeoutSeconds   int     `json:"httpClientTimeoutSeconds"`
 	MaxRetries                 int     `json:"maxRetries"`
 	InitialBackoffSeconds      int     `json:"initialBackoffSeconds"`
-	LargeAttachmentThresholdMB int     `json:"largeAttachmentThresholdMB"`
-	ChunkSizeMB                int     `json:"chunkSizeMB"`
 	MaxParallelDownloads       int     `json:"maxParallelDownloads"`
 	APICallsPerSecond          float64 `json:"apiCallsPerSecond"`
 	APIBurst                   int     `json:"apiBurst"`
-	StateSaveInterval          int     `json:"stateSaveInterval"`
+
+	// Attachment settings
+	LargeAttachmentThresholdMB int     `json:"largeAttachmentThresholdMB"`
+	ChunkSizeMB                int     `json:"chunkSizeMB"`
 	BandwidthLimitMBs          float64 `json:"bandwidthLimitMBs"`
+
+	// State settings
+	StateSaveInterval          int     `json:"stateSaveInterval"`
 }
 
 // SetDefaults sets default values for the configuration parameters.
@@ -52,6 +68,9 @@ func (c *Config) SetDefaults() {
 	}
 	if c.BandwidthLimitMBs == 0 {
 		c.BandwidthLimitMBs = 0 // Default: 0 means disabled
+	}
+	if c.ProcessingMode == "" {
+		c.ProcessingMode = "full" // Default: full processing
 	}
 }
 
