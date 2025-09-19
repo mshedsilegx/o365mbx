@@ -20,6 +20,24 @@ It is designed for high-performance, parallelized downloading and is robust and 
 *   **Health Check Mode**: Provides a "health check" mode to verify connectivity and authentication with the O365 mailbox without performing a full download.
 *   **Structured Logging**: Uses `logrus` for structured and informative logging, with a configurable debug level.
 
+## Workspace Directory Structure
+
+The application saves each email into a dedicated folder within the specified workspace. The folder is named after the message's unique ID. Here is an example of the directory structure for a single downloaded email:
+
+```
+/path/to/your/workspace/
+└── AAMkAGI0ZD... (message ID)
+    ├── attachments
+    │   ├── 01_quarterly_report.pdf
+    │   └── 02_logo.png
+    ├── body.html
+    └── metadata.json
+```
+
+*   **`metadata.json`**: A JSON file containing detailed metadata about the email, including sender, recipients, subject, date, and information about the attachments.
+*   **`body.html` / `body.txt`**: The body of the email. The extension depends on the original content type or the conversion option specified.
+*   **`attachments/`**: A sub-directory containing all attachments from the email. Each attachment is prefixed with a two-digit sequence number.
+
 ## Token Management
 
 The application requires a valid JWT access token for the Microsoft Graph API. You must provide the token using **exactly one** of the following methods:
@@ -218,6 +236,18 @@ This example configures the application for maximum download speed by increasing
 ### 7. Bandwidth-Limited Download
 
 This example throttles the total download speed to 50 MB/s to avoid hitting API data egress limits during a very large-scale download.
+
+### 8. Body Conversion to Plain Text
+
+This example downloads all emails and converts their bodies from HTML to plain text.
+
+```shell
+./o365mbx \
+    -mailbox "user@example.com" \
+    -workspace "/path/to/your/output" \
+    -token-file "/path/to/token.txt" \
+    -convert-body text
+```
 
 ```shell
 ./o365mbx \
