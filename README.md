@@ -131,8 +131,8 @@ All configuration options can be controlled via command-line arguments. Any flag
 | Argument                        | Description                                                               | Required | Default |
 | ------------------------------- | ------------------------------------------------------------------------- | -------- | ------- |
 | **Required**                    |                                                                           |          |         |
-| `-mailbox`                      | The email address of the mailbox to download.                             | **Yes**  |         |
-| `-workspace`                    | The absolute path to a unique folder for storing downloaded artifacts.    | **Yes**  |         |
+| `-mailbox`                      | The email address of the mailbox to download. Can also be set in config.  | **Yes**  |         |
+| `-workspace`                    | The absolute path for storing artifacts. Can also be set in config.       | **Yes**  |         |
 | **Token (Choose One)**          |                                                                           | **Yes**  |         |
 | `-token-string`                 | JWT token as a string.                                                    |          |         |
 | `-token-file`                   | Path to a file containing the JWT token.                                  |          |         |
@@ -173,6 +173,8 @@ For a more permanent setup, you can use a JSON file (e.g., `config.json`) and pa
 
 ```json
 {
+  "mailboxName": "user@example.com",
+  "workspacePath": "/path/to/your/output",
   "tokenString": "your-jwt-token-here",
   "debugLogging": false,
   "processingMode": "route",
@@ -195,6 +197,9 @@ For a more permanent setup, you can use a JSON file (e.g., `config.json`) and pa
 
 ### Configuration Directives
 
+*   **Required**:
+    *   `mailboxName`: (String) The email address of the mailbox to download.
+    *   `workspacePath`: (String) The absolute path to a unique folder for storing downloaded artifacts.
 *   **Token Management**:
     *   `tokenString`: (String) The JWT token.
     *   `tokenFile`: (String) Path to the token file.

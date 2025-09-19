@@ -51,7 +51,7 @@ type DownloadState struct {
 	Mu                   sync.Mutex
 }
 
-func RunEngine(ctx context.Context, cfg *Config, o365Client o365client.O365ClientInterface, emailProcessor emailprocessor.EmailProcessorInterface, fileHandler filehandler.FileHandlerInterface, accessToken, mailboxName, workspacePath, version string) {
+func RunEngine(ctx context.Context, cfg *Config, o365Client o365client.O365ClientInterface, emailProcessor emailprocessor.EmailProcessorInterface, fileHandler filehandler.FileHandlerInterface, accessToken, version string) {
 	stats := &RunStats{}
 	startTime := time.Now()
 
@@ -65,7 +65,7 @@ func RunEngine(ctx context.Context, cfg *Config, o365Client o365client.O365Clien
 		fmt.Println("-----------------")
 	}()
 
-	if err := validateWorkspacePath(workspacePath); err != nil {
+	if err := validateWorkspacePath(cfg.WorkspacePath); err != nil {
 		log.Fatalf("Error validating workspacePath: %v", err)
 	}
 
@@ -76,12 +76,12 @@ func RunEngine(ctx context.Context, cfg *Config, o365Client o365client.O365Clien
 	if err := fileHandler.CreateWorkspace(); err != nil {
 		log.Fatalf("Error creating workspace: %v", err)
 	}
-	log.WithField("path", workspacePath).Infof("Workspace created.")
+	log.WithField("path", cfg.WorkspacePath).Infof("Workspace created.")
 
-	runDownloadMode(ctx, cfg, o365Client, emailProcessor, fileHandler, accessToken, mailboxName, stats)
+	runDownloadMode(ctx, cfg, o365Client, emailProcessor, fileHandler, accessToken, stats)
 }
 
-func runDownloadMode(ctx context.Context, cfg *Config, o365Client o365client.O365ClientInterface, emailProcessor emailprocessor.EmailProcessorInterface, fileHandler filehandler.FileHandlerInterface, accessToken, mailboxName string, stats *RunStats) {
+func runDownloadMode(ctx context.Context, cfg *Config, o365Client o365client.O365ClientInterface, emailProcessor emailprocessor.EmailProcessorInterface, fileHandler filehandler.FileHandlerInterface, accessToken string, stats *RunStats) {
 	var state *o365client.RunState
 	var err error
 	if cfg.ProcessingMode == "incremental" {
@@ -115,7 +115,7 @@ func runDownloadMode(ctx context.Context, cfg *Config, o365Client o365client.O36
 
 	if cfg.ProcessingMode == "route" {
 		aggregatorWg.Add(1)
-		go runAggregator(ctx, cfg, o365Client, mailboxName, resultsChan, &aggregatorWg)
+		go runAggregator(ctx, cfg, o365Client, resultsChan, &aggregatorWg)
 	}
 
 	semaphore := make(chan struct{}, cfg.MaxParallelDownloads)
@@ -123,7 +123,7 @@ func runDownloadMode(ctx context.Context, cfg *Config, o365Client o365client.O36
 	sourceFolderID := cfg.InboxFolder
 	if strings.ToLower(sourceFolderID) != "inbox" {
 		var err error
-		sourceFolderID, err = o365Client.GetOrCreateFolderIDByName(ctx, mailboxName, cfg.InboxFolder)
+		sourceFolderID, err = o365Client.GetOrCreateFolderIDByName(ctx, cfg.MailboxName, cfg.InboxFolder)
 		if err != nil {
 			log.Fatalf("Failed to get or create source folder '%s': %v", cfg.InboxFolder, err)
 		}
@@ -132,7 +132,7 @@ func runDownloadMode(ctx context.Context, cfg *Config, o365Client o365client.O36
 	producerWg.Add(1)
 	go func() {
 		defer producerWg.Done()
-		err := o365Client.GetMessages(ctx, mailboxName, sourceFolderID, state, messagesChan)
+		err := o365Client.GetMessages(ctx, cfg.MailboxName, sourceFolderID, state, messagesChan)
 		if err != nil {
 			log.Fatalf("O365 API error fetching messages: %v", err)
 		}
@@ -309,17 +309,17 @@ func runDownloadMode(ctx context.Context, cfg *Config, o365Client o365client.O36
 	}
 }
 
-func runAggregator(ctx context.Context, cfg *Config, o365Client o365client.O365ClientInterface, mailboxName string, resultsChan <-chan ProcessingResult, wg *sync.WaitGroup) {
+func runAggregator(ctx context.Context, cfg *Config, o365Client o365client.O365ClientInterface, resultsChan <-chan ProcessingResult, wg *sync.WaitGroup) {
 	defer wg.Done()
 	log.Info("Aggregator started.")
 
 	messageStates := make(map[string]*MessageState)
 
-	processedFolderID, err := o365Client.GetOrCreateFolderIDByName(ctx, mailboxName, cfg.ProcessedFolder)
+	processedFolderID, err := o365Client.GetOrCreateFolderIDByName(ctx, cfg.MailboxName, cfg.ProcessedFolder)
 	if err != nil {
 		log.Fatalf("Aggregator failed to get or create processed folder: %v", err)
 	}
-	errorFolderID, err := o365Client.GetOrCreateFolderIDByName(ctx, mailboxName, cfg.ErrorFolder)
+	errorFolderID, err := o365Client.GetOrCreateFolderIDByName(ctx, cfg.MailboxName, cfg.ErrorFolder)
 	if err != nil {
 		log.Fatalf("Aggregator failed to get or create error folder: %v", err)
 	}
@@ -340,14 +340,14 @@ func runAggregator(ctx context.Context, cfg *Config, o365Client o365client.O365C
 			state.HasFailed = true
 		}
 
-		if state.CompletedTasks == state.ExpectedTasks {
+		if state.CompletedTasks >= state.ExpectedTasks {
 			destinationID := processedFolderID
 			if state.HasFailed {
 				destinationID = errorFolderID
 			}
 
 			log.WithFields(log.Fields{"messageID": result.MessageID, "hasFailed": state.HasFailed}).Info("Message processing complete. Moving message.")
-			if err := o365Client.MoveMessage(ctx, mailboxName, result.MessageID, destinationID); err != nil {
+			if err := o365Client.MoveMessage(ctx, cfg.MailboxName, result.MessageID, destinationID); err != nil {
 				log.WithFields(log.Fields{"messageID": result.MessageID, "error": err}).Errorf("Failed to move message.")
 			} else {
 				log.WithField("messageID", result.MessageID).Infof("Successfully moved message.")

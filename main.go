@@ -70,6 +70,10 @@ func main() {
 			cfg.TokenEnv = *tokenEnv
 		case "remove-token-file":
 			cfg.RemoveTokenFile = *removeTokenFile
+		case "mailbox":
+			cfg.MailboxName = *mailboxName
+		case "workspace":
+			cfg.WorkspacePath = *workspacePath
 		case "debug":
 			cfg.DebugLogging = *debug
 		case "processing-mode":
@@ -146,11 +150,14 @@ func main() {
 	}
 
 	// --- Final Validation ---
-	if *mailboxName == "" {
-		log.Fatal("Error: -mailbox is a required argument.")
+	if cfg.MailboxName == "" {
+		log.Fatal("Error: Mailbox name is a required argument (set via -mailbox or in config file).")
 	}
-	if !isValidEmail(*mailboxName) {
-		log.Fatalf("Error: Invalid mailbox name format: %s", *mailboxName)
+	if !isValidEmail(cfg.MailboxName) {
+		log.Fatalf("Error: Invalid mailbox name format: %s", cfg.MailboxName)
+	}
+	if cfg.WorkspacePath == "" {
+		log.Fatal("Error: Workspace path is a required argument (set via -workspace or in config file).")
 	}
 	if cfg.ProcessingMode == "incremental" && cfg.StateFilePath == "" {
 		log.Fatal("Error: State file path must be provided for incremental processing mode.")
@@ -167,11 +174,11 @@ func main() {
 	// --- Dependency Injection ---
 	o365Client := o365client.NewO365Client(accessToken, time.Duration(cfg.HTTPClientTimeoutSeconds)*time.Second, cfg.MaxRetries, cfg.InitialBackoffSeconds, cfg.APICallsPerSecond, cfg.APIBurst, rng)
 	emailProcessor := emailprocessor.NewEmailProcessor()
-	fileHandler := filehandler.NewFileHandler(*workspacePath, o365Client, emailProcessor, cfg.LargeAttachmentThresholdMB, cfg.ChunkSizeMB, cfg.BandwidthLimitMBs)
+	fileHandler := filehandler.NewFileHandler(cfg.WorkspacePath, o365Client, emailProcessor, cfg.LargeAttachmentThresholdMB, cfg.ChunkSizeMB, cfg.BandwidthLimitMBs)
 
 	// --- Health Check or Main Engine Execution ---
 	if *healthCheck {
-		runHealthCheckMode(ctx, o365Client, *mailboxName)
+		runHealthCheckMode(ctx, o365Client, cfg.MailboxName)
 		os.Exit(0)
 	}
 
@@ -185,7 +192,7 @@ func main() {
 		}
 	}()
 
-	engine.RunEngine(ctx, cfg, o365Client, emailProcessor, fileHandler, accessToken, *mailboxName, *workspacePath, version)
+	engine.RunEngine(ctx, cfg, o365Client, emailProcessor, fileHandler, accessToken, version)
 }
 
 func loadAccessToken(cfg *engine.Config) (string, error) {
