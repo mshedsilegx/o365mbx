@@ -161,9 +161,12 @@ func runDownloadMode(ctx context.Context, cfg *Config, o365Client o365client.O36
 				msgPath, saveErr := fileHandler.SaveMessage(&msg, processedBody, effectiveConvertBody)
 				if saveErr != nil {
 					atomic.AddUint32(&stats.NonFatalErrors, 1)
-					log.WithFields(log.Fields{"messageID": msg.ID, "error": saveErr}).Errorf("Error saving email message.")
 					if processingErr == nil {
 						processingErr = saveErr
+					}
+					log.WithFields(log.Fields{"messageID": msg.ID, "error": processingErr}).Errorf("Error saving email message.")
+					if cfg.ProcessingMode == "route" {
+						resultsChan <- ProcessingResult{MessageID: msg.ID, Err: processingErr, IsInitialization: true, TotalTasks: 1 + len(msg.Attachments)}
 					}
 					<-semaphore
 					continue
