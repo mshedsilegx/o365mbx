@@ -49,7 +49,7 @@ The `metadata.json` file provides a detailed overview of the downloaded email.
 *   **`from`**: The sender of the email. Same structure as a recipient object.
 *   **`subject`**: The subject line of the email.
 *   **`received_date`**: The date and time the email was received, in ISO 8601 format (UTC).
-*   **`body`**: The filename of the email body (e.g., `body.html` or `body.txt`).
+*   **`body`**: The filename of the email body (e.g., `body.html`, `body.txt` or `body.pdf`).
 *   **`content_type_of_body`**: The content type of the saved body file (`text/html`, `text/plain`, or `application/pdf`).
 *   **`attachment_counts`**: The total number of attachments in the email.
 *   **`list_of_attachments`**: A list of objects, where each object represents an attachment and contains the following fields:
@@ -321,14 +321,6 @@ This example downloads all emails and converts their bodies from HTML to plain t
     -workspace "/path/to/your/output" \
     -token-file "/path/to/token.txt" \
     -convert-body text
-```
-
-```shell
-./o365mbx \
-    -mailbox "user@example.com" \
-    -workspace "/path/to/your/output" \
-    -token-file "/path/to/token.txt" \
-    -bandwidth-limit-mbs 50.0
 ```
 
 ## License
