@@ -241,32 +241,35 @@ func runDownloadMode(ctx context.Context, cfg *Config, o365Client o365client.O36
 					log.WithFields(log.Fields{"attachmentName": job.Attachment.Name, "messageID": job.MessageID, "error": err}).Error("Failed to save attachment.")
 				} else {
 					atomic.AddUint32(&stats.AttachmentsProcessed, 1)
-					// Finalize metadata if this is the last attachment
-					statesMutex.Lock()
-					state, ok := messageStates[job.MessageID]
-					if ok {
-						state.Mu.Lock()
-						state.CompletedAttachments++
-						state.Attachments = append(state.Attachments, *attMetadata)
-						isLastAttachment := state.CompletedAttachments == state.ExpectedAttachments
-						state.Mu.Unlock()
-
-						if isLastAttachment {
-							log.WithField("messageID", job.MessageID).Info("All attachments for message downloaded, writing final metadata.")
-							err := fileHandler.WriteAttachmentsToMetadata(job.MsgPath, state.Attachments)
-							if err != nil {
-								atomic.AddUint32(&stats.NonFatalErrors, 1)
-								log.WithFields(log.Fields{"messageID": job.MessageID, "error": err}).Error("Failed to write final metadata.")
-								if cfg.ProcessingMode == "route" {
-									resultsChan <- ProcessingResult{MessageID: job.MessageID, Err: err}
-								}
-							}
-							// Clean up state for the message
-							delete(messageStates, job.MessageID)
-						}
-					}
-					statesMutex.Unlock()
 				}
+
+				// Always update state to prevent memory leaks, even on failure.
+				statesMutex.Lock()
+				state, ok := messageStates[job.MessageID]
+				if ok {
+					state.Mu.Lock()
+					state.CompletedAttachments++
+					if err == nil { // Only append metadata on success
+						state.Attachments = append(state.Attachments, *attMetadata)
+					}
+					isLastAttachment := state.CompletedAttachments == state.ExpectedAttachments
+					state.Mu.Unlock()
+
+					if isLastAttachment {
+						log.WithField("messageID", job.MessageID).Info("All attachments for message downloaded, writing final metadata.")
+						err := fileHandler.WriteAttachmentsToMetadata(job.MsgPath, state.Attachments)
+						if err != nil {
+							atomic.AddUint32(&stats.NonFatalErrors, 1)
+							log.WithFields(log.Fields{"messageID": job.MessageID, "error": err}).Error("Failed to write final metadata.")
+							if cfg.ProcessingMode == "route" {
+								resultsChan <- ProcessingResult{MessageID: job.MessageID, Err: err}
+							}
+						}
+						// Clean up state for the message
+						delete(messageStates, job.MessageID)
+					}
+				}
+				statesMutex.Unlock()
 
 				if cfg.ProcessingMode == "route" {
 					resultsChan <- ProcessingResult{MessageID: job.MessageID, Err: err}
