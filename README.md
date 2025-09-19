@@ -126,6 +126,16 @@ For a more permanent setup, you can use a JSON file (e.g., `config.json`) and pa
 *   **State**:
     *   `stateSaveInterval`: (Integer) How often to save the state file during a run (number of messages).
 
+### A Note on `route` Mode Performance
+
+The `route` processing mode is designed for workflows that require a guarantee that a message is moved only after its body and all of its attachments have been successfully processed. To achieve this, it uses a simpler concurrency model than the other modes. For maximum download throughput of a large mailbox, the `full` or `incremental` modes are recommended.
+
+### A Note on API Permissions
+
+For maximum security, it is recommended to use an Azure App Registration with the principle of least privilege.
+*   For download-only modes (`full`, `incremental`), the `Mail.Read` permission is sufficient.
+*   For `route` mode, which moves emails, the `Mail.ReadWrite` permission is required.
+
 ## Examples
 
 ### 1. Basic Run with Token String
