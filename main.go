@@ -105,6 +105,8 @@ func main() {
 	debug := flag.Bool("debug", false, "Enable debug logging")
 	processingMode := flag.String("processing-mode", "full", "Processing mode: 'full' or 'incremental'")
 	stateFilePath := flag.String("state", "", "Path to the state file for incremental processing")
+	processedFolder := flag.String("processed-folder", "Processed", "Destination folder for successfully processed messages in route mode.")
+	errorFolder := flag.String("error-folder", "Error", "Destination folder for messages that failed processing in route mode.")
 	flag.Parse()
 
 	log.SetFormatter(&log.TextFormatter{FullTimestamp: true})
@@ -162,6 +164,10 @@ func main() {
 			cfg.StateSaveInterval = *stateSaveInterval
 		case "bandwidth-limit-mbs":
 			cfg.BandwidthLimitMBs = *bandwidthLimitMBs
+		case "processed-folder":
+			cfg.ProcessedFolder = *processedFolder
+		case "error-folder":
+			cfg.ErrorFolder = *errorFolder
 		}
 	})
 
@@ -187,11 +193,19 @@ func main() {
 	if !isValidEmail(*mailboxName) {
 		log.WithField("argument", "mailboxName").Fatalf("Error: Invalid mailbox name format: %s", *mailboxName)
 	}
-	if *processingMode != "full" && *processingMode != "incremental" {
-		log.WithField("argument", "processing-mode").Fatalf("Error: Invalid processing mode. Must be 'full' or 'incremental'.")
+	if cfg.ProcessingMode != "full" && cfg.ProcessingMode != "incremental" && cfg.ProcessingMode != "route" {
+		log.WithField("argument", "processing-mode").Fatalf("Error: Invalid processing mode. Must be 'full', 'incremental', or 'route'.")
 	}
-	if *processingMode == "incremental" && *stateFilePath == "" {
+	if cfg.ProcessingMode == "incremental" && cfg.StateFilePath == "" {
 		log.WithField("argument", "state").Fatalf("Error: State file path must be provided for incremental processing mode.")
+	}
+	if cfg.ProcessingMode == "route" {
+		if cfg.ProcessedFolder == "" {
+			log.WithField("argument", "processed-folder").Fatalf("Error: Processed folder name must be provided for route mode.")
+		}
+		if cfg.ErrorFolder == "" {
+			log.WithField("argument", "error-folder").Fatalf("Error: Error folder name must be provided for route mode.")
+		}
 	}
 
 	o365Client := o365client.NewO365Client(accessToken, time.Duration(cfg.HTTPClientTimeoutSeconds)*time.Second, cfg.MaxRetries, cfg.InitialBackoffSeconds, cfg.APICallsPerSecond, cfg.APIBurst, rng)
@@ -214,6 +228,105 @@ func main() {
 	}()
 
 	runDownloadMode(ctx, cfg, accessToken, *mailboxName, *workspacePath, rng)
+}
+
+func runRouteMode(ctx context.Context, cfg *Config, o365Client o365client.O365ClientInterface, emailProcessor *emailprocessor.EmailProcessor, fileHandler *filehandler.FileHandler, accessToken, mailboxName string, stats *RunStats) {
+	log.Info("Running in route mode.")
+
+	// Get or create folder IDs
+	processedFolderID, err := o365Client.GetOrCreateFolderIDByName(ctx, mailboxName, cfg.ProcessedFolder)
+	if err != nil {
+		log.Fatalf("Failed to get or create processed folder: %v", err)
+	}
+	errorFolderID, err := o365Client.GetOrCreateFolderIDByName(ctx, mailboxName, cfg.ErrorFolder)
+	if err != nil {
+		log.Fatalf("Failed to get or create error folder: %v", err)
+	}
+
+	// In route mode, we process all messages, so we start with an empty state.
+	state := &o365client.RunState{}
+	messagesChan := make(chan o365client.Message, cfg.MaxParallelDownloads*2)
+	var producerWg, workerWg sync.WaitGroup
+	semaphore := make(chan struct{}, cfg.MaxParallelDownloads)
+
+	// Producer to fetch all messages
+	producerWg.Add(1)
+	go func() {
+		defer producerWg.Done()
+		if err := o365Client.GetMessages(ctx, mailboxName, state, messagesChan); err != nil {
+			log.Fatalf("O365 API error fetching messages for routing: %v", err)
+		}
+	}()
+
+	// Workers to process and then move messages
+	for i := 0; i < cfg.MaxParallelDownloads; i++ {
+		workerWg.Add(1)
+		go func() {
+			defer workerWg.Done()
+			for msg := range messagesChan {
+				semaphore <- struct{}{}
+				var processingError bool
+
+				log.WithFields(log.Fields{"messageID": msg.ID, "subject": msg.Subject}).Info("Routing message.")
+				atomic.AddUint32(&stats.messagesProcessed, 1)
+
+				// Process body
+				cleanedBody, err := emailProcessor.CleanHTML(msg.Body.Content)
+				if err != nil {
+					atomic.AddUint32(&stats.nonFatalErrors, 1)
+					log.WithFields(log.Fields{"messageID": msg.ID, "error": err}).Warn("Failed to clean HTML for message.")
+					cleanedBody = msg.Body.Content
+					processingError = true
+				}
+				if err := fileHandler.SaveEmailBody(msg.Subject, msg.ID, cleanedBody); err != nil {
+					atomic.AddUint32(&stats.nonFatalErrors, 1)
+					log.WithFields(log.Fields{"messageID": msg.ID, "error": err}).Errorf("Error saving email body.")
+					processingError = true
+				}
+
+				// Process attachments
+				if msg.HasAttachments {
+					for _, att := range msg.Attachments {
+						var err error
+						if att.DownloadURL != "" {
+							err = fileHandler.SaveAttachment(ctx, att.Name, msg.ID, att.DownloadURL, accessToken, att.Size)
+						} else if att.ContentBytes != "" {
+							err = fileHandler.SaveAttachmentFromBytes(att.Name, msg.ID, att.ContentBytes)
+						} else {
+							atomic.AddUint32(&stats.nonFatalErrors, 1)
+							log.WithFields(log.Fields{"attachmentName": att.Name, "messageID": msg.ID}).Warn("Skipping attachment: No download URL or content bytes.")
+							continue
+						}
+
+						if err != nil {
+							atomic.AddUint32(&stats.nonFatalErrors, 1)
+							log.WithFields(log.Fields{"attachmentName": att.Name, "messageID": msg.ID, "error": err}).Error("Failed to save attachment.")
+							processingError = true
+						} else {
+							atomic.AddUint32(&stats.attachmentsProcessed, 1)
+						}
+					}
+				}
+
+				// Move message based on outcome
+				destinationID := processedFolderID
+				if processingError {
+					destinationID = errorFolderID
+				}
+				if err := o365Client.MoveMessage(ctx, mailboxName, msg.ID, destinationID); err != nil {
+					atomic.AddUint32(&stats.nonFatalErrors, 1)
+					log.WithFields(log.Fields{"messageID": msg.ID, "error": err}).Errorf("Failed to move message.")
+				} else {
+					log.WithField("messageID", msg.ID).Infof("Successfully processed and moved message.")
+				}
+				<-semaphore
+			}
+		}()
+	}
+
+	producerWg.Wait()
+	close(messagesChan)
+	workerWg.Wait()
 }
 
 func loadAccessToken(cfg *Config) (string, error) {
@@ -306,6 +419,12 @@ func runDownloadMode(ctx context.Context, cfg *Config, accessToken, mailboxName,
 	}
 	log.WithField("path", workspacePath).Infof("Workspace created.")
 
+	if cfg.ProcessingMode == "route" {
+		runRouteMode(ctx, cfg, o365Client, emailProcessor, fileHandler, accessToken, mailboxName, stats)
+		return
+	}
+
+	// Logic for 'full' and 'incremental' modes
 	var state *o365client.RunState
 	var err error
 	if cfg.ProcessingMode == "incremental" {

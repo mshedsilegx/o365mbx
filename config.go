@@ -16,9 +16,11 @@ type Config struct {
 	RemoveTokenFile bool   `json:"removeTokenFile,omitempty"`
 
 	// General settings
-	DebugLogging bool   `json:"debugLogging,omitempty"`
-	ProcessingMode string `json:"processingMode,omitempty"`
-	StateFilePath  string `json:"stateFilePath,omitempty"`
+	DebugLogging    bool   `json:"debugLogging,omitempty"`
+	ProcessingMode  string `json:"processingMode,omitempty"`
+	StateFilePath   string `json:"stateFilePath,omitempty"`
+	ProcessedFolder string `json:"processedFolder,omitempty"`
+	ErrorFolder     string `json:"errorFolder,omitempty"`
 
 	// HTTP and API settings
 	HTTPClientTimeoutSeconds   int     `json:"httpClientTimeoutSeconds"`
@@ -71,6 +73,12 @@ func (c *Config) SetDefaults() {
 	}
 	if c.ProcessingMode == "" {
 		c.ProcessingMode = "full" // Default: full processing
+	}
+	if c.ProcessedFolder == "" {
+		c.ProcessedFolder = "Processed"
+	}
+	if c.ErrorFolder == "" {
+		c.ErrorFolder = "Error"
 	}
 }
 

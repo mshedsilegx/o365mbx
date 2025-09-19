@@ -1,6 +1,7 @@
 package o365client
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -23,6 +24,8 @@ type O365ClientInterface interface {
 	DoRequestWithRetry(req *http.Request) (*http.Response, error)
 	GetMessages(ctx context.Context, mailboxName string, state *RunState, messagesChan chan<- Message) error
 	GetMailboxStatistics(ctx context.Context, mailboxName string) (int, error)
+	MoveMessage(ctx context.Context, mailboxName, messageID, destinationFolderID string) error
+	GetOrCreateFolderIDByName(ctx context.Context, mailboxName, folderName string) (string, error)
 }
 
 type O365Client struct {
@@ -186,6 +189,87 @@ func (c *O365Client) GetMessages(ctx context.Context, mailboxName string, state 
 	return nil
 }
 
+type MailFolder struct {
+	ID          string `json:"id"`
+	DisplayName string `json:"displayName"`
+}
+
+func (c *O365Client) GetOrCreateFolderIDByName(ctx context.Context, mailboxName, folderName string) (string, error) {
+	// First, try to get the folder by name
+	url := fmt.Sprintf("%s/users/%s/mailFolders?$filter=displayName eq '%s'", graphAPIBaseURL, mailboxName, url.QueryEscape(folderName))
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return "", fmt.Errorf("failed to create request to get folder by name: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+c.accessToken)
+
+	resp, err := c.DoRequestWithRetry(req)
+	if err != nil {
+		return "", fmt.Errorf("failed to get folder by name: %w", err)
+	}
+
+	if resp.StatusCode == http.StatusOK {
+		body, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if err != nil {
+			return "", fmt.Errorf("failed to read response body for folder: %w", err)
+		}
+
+		var folderResponse struct {
+			Value []MailFolder `json:"value"`
+		}
+		if err := json.Unmarshal(body, &folderResponse); err != nil {
+			return "", fmt.Errorf("failed to unmarshal folder response: %w", err)
+		}
+
+		if len(folderResponse.Value) > 0 {
+			log.WithField("folderName", folderName).Info("Found existing folder.")
+			return folderResponse.Value[0].ID, nil
+		}
+	} else {
+		resp.Body.Close()
+	}
+
+	// If not found, create it
+	log.WithField("folderName", folderName).Info("Folder not found, creating it.")
+	return c.createFolder(ctx, mailboxName, folderName)
+}
+
+func (c *O365Client) createFolder(ctx context.Context, mailboxName, folderName string) (string, error) {
+	url := fmt.Sprintf("%s/users/%s/mailFolders", graphAPIBaseURL, mailboxName)
+	folderData := MailFolder{DisplayName: folderName}
+	body, err := json.Marshal(folderData)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal folder data: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(body))
+	if err != nil {
+		return "", fmt.Errorf("failed to create request to create folder: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+c.accessToken)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.DoRequestWithRetry(req)
+	if err != nil {
+		return "", fmt.Errorf("failed to create folder: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusCreated {
+		errorBody, _ := io.ReadAll(resp.Body)
+		return "", &apperrors.APIError{StatusCode: resp.StatusCode, Msg: fmt.Sprintf("failed to create folder: %s", string(errorBody))}
+	}
+
+	var newFolder MailFolder
+	if err := json.NewDecoder(resp.Body).Decode(&newFolder); err != nil {
+		return "", fmt.Errorf("failed to unmarshal new folder response: %w", err)
+	}
+
+	log.WithFields(log.Fields{"folderName": folderName, "folderId": newFolder.ID}).Info("Successfully created folder.")
+	return newFolder.ID, nil
+}
+
 // GetMailboxStatistics fetches the total message count for a given mailbox's Inbox.
 func (c *O365Client) GetMailboxStatistics(ctx context.Context, mailboxName string) (int, error) {
 	// URL to get the message count of the Inbox folder
@@ -264,4 +348,30 @@ type Attachment struct {
 type RunState struct {
 	LastRunTimestamp time.Time `json:"lastRunTimestamp"`
 	LastMessageID    string    `json:"lastMessageId"`
+}
+
+// MoveMessage moves a message to a specified destination folder.
+func (c *O365Client) MoveMessage(ctx context.Context, mailboxName, messageID, destinationFolderID string) error {
+	url := fmt.Sprintf("%s/users/%s/messages/%s/move", graphAPIBaseURL, mailboxName, messageID)
+
+	body := []byte(fmt.Sprintf(`{"destinationId": "%s"}`, destinationFolderID))
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(body))
+	if err != nil {
+		return fmt.Errorf("failed to create HTTP request for moving message: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+c.accessToken)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.DoRequestWithRetry(req)
+	if err != nil {
+		return fmt.Errorf("failed to move message %s: %w", messageID, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+		errorBody, _ := io.ReadAll(resp.Body)
+		return &apperrors.APIError{StatusCode: resp.StatusCode, Msg: fmt.Sprintf("failed to move message: %s", string(errorBody))}
+	}
+
+	return nil
 }

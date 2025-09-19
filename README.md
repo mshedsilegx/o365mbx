@@ -51,9 +51,11 @@ All configuration options can be controlled via command-line arguments. Any flag
 | `-healthcheck`                  | Perform a health check and exit.                                          | No       | `false` |
 | `-version`                      | Display the application version and exit.                                 | No       | `false` |
 | **Processing & State**          |                                                                           |          |         |
-| `-processing-mode`              | Processing mode: `full` or `incremental`.                                 | No       | `full`  |
+| `-processing-mode`              | Processing mode: `full`, `incremental`, or `route`.                       | No       | `full`  |
 | `-state`                        | Path to the state file for incremental processing.                        | No       |         |
 | `-state-save-interval`          | Save state every N messages during a run.                                 | No       | `100`   |
+| `-processed-folder`             | Destination folder for successful messages in `route` mode.               | No       | `Processed`|
+| `-error-folder`                 | Destination folder for failed messages in `route` mode.                   | No       | `Error` |
 | **Performance & Limits**        |                                                                           |          |         |
 | `-parallel`                     | Maximum number of parallel workers.                                       | No       | `10`    |
 | `-timeout`                      | HTTP client timeout in seconds.                                           | No       | `120`   |
@@ -77,8 +79,10 @@ For a more permanent setup, you can use a JSON file (e.g., `config.json`) and pa
 {
   "tokenString": "your-jwt-token-here",
   "debugLogging": false,
-  "processingMode": "incremental",
+  "processingMode": "route",
   "stateFilePath": "/path/to/your/state.json",
+  "processedFolder": "Processed-Archive",
+  "errorFolder": "Error-Items",
   "httpClientTimeoutSeconds": 180,
   "maxRetries": 3,
   "initialBackoffSeconds": 10,
@@ -101,8 +105,10 @@ For a more permanent setup, you can use a JSON file (e.g., `config.json`) and pa
     *   `removeTokenFile`: (Boolean) Set to `true` to delete the token file after use.
 *   **General**:
     *   `debugLogging`: (Boolean) Enables debug-level logging.
-    *   `processingMode`: (String) `full` or `incremental`.
+    *   `processingMode`: (String) `full`, `incremental`, or `route`. In `route` mode, messages are moved after processing.
     *   `stateFilePath`: (String) Absolute path to the state file for incremental mode.
+    *   `processedFolder`: (String) The destination folder for successfully processed messages in `route` mode.
+    *   `errorFolder`: (String) The destination folder for messages that failed processing in `route` mode.
 *   **HTTP and API**:
     *   `httpClientTimeoutSeconds`: (Integer) Timeout in seconds for HTTP requests.
     *   `maxRetries`: (Integer) Maximum number of retries for failed API requests.
