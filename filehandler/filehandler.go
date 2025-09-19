@@ -113,22 +113,22 @@ func (fh *FileHandler) SaveMessage(message *o365client.Message, bodyContent inte
 	switch convertBody {
 	case "text":
 		bodyExt = ".txt"
-		bodyContentType = "text"
+		bodyContentType = "text/plain"
 	case "pdf":
 		bodyExt = ".pdf"
-		bodyContentType = "pdf"
+		bodyContentType = "application/pdf"
 	case "none":
 		if contentStr, ok := bodyContent.(string); ok && fh.emailProcessor.IsHTML(contentStr) {
 			bodyExt = ".html"
-			bodyContentType = "html"
+			bodyContentType = "text/html"
 		} else {
 			bodyExt = ".txt"
-			bodyContentType = "text"
+			bodyContentType = "text/plain"
 		}
 	default:
 		// Fallback for any unexpected value, though config validation should prevent this.
 		bodyExt = ".txt"
-		bodyContentType = "text"
+		bodyContentType = "text/plain"
 	}
 	bodyFileName := "body" + bodyExt
 

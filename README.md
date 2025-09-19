@@ -50,7 +50,7 @@ The `metadata.json` file provides a detailed overview of the downloaded email.
 *   **`subject`**: The subject line of the email.
 *   **`received_date`**: The date and time the email was received, in ISO 8601 format (UTC).
 *   **`body`**: The filename of the email body (e.g., `body.html` or `body.txt`).
-*   **`content_type_of_body`**: The content type of the saved body file (`html`, `text`, or `pdf`).
+*   **`content_type_of_body`**: The content type of the saved body file (`text/html`, `text/plain`, or `application/pdf`).
 *   **`attachment_counts`**: The total number of attachments in the email.
 *   **`list_of_attachments`**: A list of objects, where each object represents an attachment and contains the following fields:
     *   `attachment_name_in_message`: The original filename of the attachment.
@@ -87,7 +87,7 @@ The `metadata.json` file provides a detailed overview of the downloaded email.
   "subject": "Q3 Financial Report and Project Updates",
   "received_date": "2024-07-21T14:30:00Z",
   "body": "body.html",
-  "content_type_of_body": "html",
+  "content_type_of_body": "text/html",
   "attachment_counts": 3,
   "list_of_attachments": [
     {
