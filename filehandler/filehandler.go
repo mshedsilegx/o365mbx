@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -11,6 +12,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	log "github.com/sirupsen/logrus"
@@ -59,6 +61,8 @@ type FileHandler struct {
 	largeAttachmentThreshold int // in bytes
 	chunkSize                int // in bytes
 	bandwidthLimiter         *rate.Limiter
+	fileMutexes              map[string]*sync.Mutex
+	mapMutex                 sync.Mutex
 }
 
 func NewFileHandler(workspacePath string, o365Client o365client.O365ClientInterface, emailProcessor emailprocessor.EmailProcessorInterface, largeAttachmentThresholdMB, chunkSizeMB int, bandwidthLimitMBs float64) *FileHandler {
@@ -76,7 +80,22 @@ func NewFileHandler(workspacePath string, o365Client o365client.O365ClientInterf
 		largeAttachmentThreshold: largeAttachmentThresholdMB * 1024 * 1024,
 		chunkSize:                chunkSizeMB * 1024 * 1024,
 		bandwidthLimiter:         limiter,
+		fileMutexes:              make(map[string]*sync.Mutex),
 	}
+}
+
+// getMutex returns a mutex for a given file path, creating it if it doesn't exist.
+func (fh *FileHandler) getMutex(filePath string) *sync.Mutex {
+	fh.mapMutex.Lock()
+	defer fh.mapMutex.Unlock()
+
+	if mu, ok := fh.fileMutexes[filePath]; ok {
+		return mu
+	}
+
+	mu := &sync.Mutex{}
+	fh.fileMutexes[filePath] = mu
+	return mu
 }
 
 // CreateWorkspace creates the unique workspace directory and verifies it's not a symlink.
@@ -207,7 +226,7 @@ func (lr *limitedReader) Read(p []byte) (n int, err error) {
 }
 
 // SaveAttachment saves an attachment to a file and returns its metadata.
-func (fh *FileHandler) SaveAttachment(ctx context.Context, msgPath string, att o365client.Attachment, accessToken string, sequence int) (*AttachmentMetadata, error) {
+func (fh *FileHandler) SaveAttachment(ctx context.Context, msgPath string, att o365client.Attachment, accessToken string, sequence int) (metadata *AttachmentMetadata, err error) {
 	fileName := fmt.Sprintf("%02d_%s", sequence, sanitizeFileName(att.Name))
 	filePath := filepath.Join(msgPath, "attachments", fileName)
 
@@ -216,8 +235,8 @@ func (fh *FileHandler) SaveAttachment(ctx context.Context, msgPath string, att o
 		return nil, &apperrors.FileSystemError{Path: filePath, Msg: "failed to create file for attachment", Err: err}
 	}
 	defer func() {
-		if err := out.Close(); err != nil {
-			log.Warnf("Error closing file %s: %v", filePath, err)
+		if closeErr := out.Close(); closeErr != nil && err == nil {
+			err = &apperrors.FileSystemError{Path: filePath, Msg: "failed to close file after writing attachment", Err: closeErr}
 		}
 	}()
 
@@ -230,11 +249,13 @@ func (fh *FileHandler) SaveAttachment(ctx context.Context, msgPath string, att o
 
 		resp, err := fh.o365Client.DoRequestWithRetry(req)
 		if err != nil {
-			// Error already wrapped by DoRequestWithRetry, just check for specific types
-			if apiErr, ok := err.(*apperrors.APIError); ok {
+			// Error already wrapped by DoRequestWithRetry, check for specific types
+			var apiErr *apperrors.APIError
+			var authErr *apperrors.AuthError
+			if errors.As(err, &apiErr) {
 				return nil, apiErr
 			}
-			if authErr, ok := err.(*apperrors.AuthError); ok {
+			if errors.As(err, &authErr) {
 				return nil, authErr
 			}
 			return nil, fmt.Errorf("failed to download attachment from %s: %w", att.DownloadURL, err)
@@ -284,10 +305,12 @@ func (fh *FileHandler) SaveAttachment(ctx context.Context, msgPath string, att o
 
 			resp, err := fh.o365Client.DoRequestWithRetry(req)
 			if err != nil {
-				if apiErr, ok := err.(*apperrors.APIError); ok {
+				var apiErr *apperrors.APIError
+				var authErr *apperrors.AuthError
+				if errors.As(err, &apiErr) {
 					return nil, apiErr
 				}
-				if authErr, ok := err.(*apperrors.AuthError); ok {
+				if errors.As(err, &authErr) {
 					return nil, authErr
 				}
 				return nil, fmt.Errorf("failed to download attachment chunk from %s (range %d-%d): %w", att.DownloadURL, downloadedBytes, endByte, err)
@@ -313,16 +336,17 @@ func (fh *FileHandler) SaveAttachment(ctx context.Context, msgPath string, att o
 		log.WithField("attachmentName", att.Name).Infof("Successfully downloaded large attachment.")
 	}
 
-	return &AttachmentMetadata{
+	metadata = &AttachmentMetadata{
 		Name:        att.Name,
 		ContentType: att.ContentType,
 		Size:        att.Size,
 		SavedAs:     fileName,
-	}, nil
+	}
+	return
 }
 
 // SaveAttachmentFromBytes saves an attachment from its base64 encoded content and returns its metadata.
-func (fh *FileHandler) SaveAttachmentFromBytes(msgPath string, att o365client.Attachment, sequence int) (*AttachmentMetadata, error) {
+func (fh *FileHandler) SaveAttachmentFromBytes(msgPath string, att o365client.Attachment, sequence int) (metadata *AttachmentMetadata, err error) {
 	fileName := fmt.Sprintf("%02d_%s", sequence, sanitizeFileName(att.Name))
 	filePath := filepath.Join(msgPath, "attachments", fileName)
 
@@ -331,8 +355,8 @@ func (fh *FileHandler) SaveAttachmentFromBytes(msgPath string, att o365client.At
 		return nil, &apperrors.FileSystemError{Path: filePath, Msg: "failed to create file for attachment from bytes", Err: err}
 	}
 	defer func() {
-		if err := out.Close(); err != nil {
-			log.Warnf("Error closing file %s: %v", filePath, err)
+		if closeErr := out.Close(); closeErr != nil && err == nil {
+			err = &apperrors.FileSystemError{Path: filePath, Msg: "failed to close file after writing attachment", Err: closeErr}
 		}
 	}()
 
@@ -343,17 +367,21 @@ func (fh *FileHandler) SaveAttachmentFromBytes(msgPath string, att o365client.At
 	}
 
 	log.WithField("attachmentName", att.Name).Infof("Successfully saved attachment from contentBytes.")
-	return &AttachmentMetadata{
+	metadata = &AttachmentMetadata{
 		Name:        att.Name,
 		ContentType: att.ContentType,
 		Size:        att.Size,
 		SavedAs:     fileName,
-	}, nil
+	}
+	return
 }
 
 // WriteAttachmentsToMetadata writes the final list of attachments to the metadata.json file.
 func (fh *FileHandler) WriteAttachmentsToMetadata(msgPath string, attachments []AttachmentMetadata) error {
 	metadataPath := filepath.Join(msgPath, "metadata.json")
+	mu := fh.getMutex(metadataPath)
+	mu.Lock()
+	defer mu.Unlock()
 
 	data, err := os.ReadFile(metadataPath)
 	if err != nil {
@@ -388,6 +416,10 @@ func (fh *FileHandler) WriteAttachmentsToMetadata(msgPath string, attachments []
 
 // SaveState saves the RunState to the given file path as JSON.
 func (fh *FileHandler) SaveState(state *o365client.RunState, stateFilePath string) error {
+	mu := fh.getMutex(stateFilePath)
+	mu.Lock()
+	defer mu.Unlock()
+
 	data, err := json.Marshal(state)
 	if err != nil {
 		return fmt.Errorf("failed to marshal state to JSON: %w", err)

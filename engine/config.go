@@ -2,6 +2,7 @@ package engine
 
 import (
 	"fmt"
+	"os"
 )
 
 type Config struct {
@@ -137,8 +138,25 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("invalid convertBody value: %s. Must be one of 'none', 'text', or 'pdf'", c.ConvertBody)
 	}
 
-	if c.ConvertBody == "pdf" && c.ChromiumPath == "" {
-		return fmt.Errorf("chromiumPath must be set when convertBody is 'pdf'")
+	if c.ConvertBody == "pdf" {
+		if c.ChromiumPath == "" {
+			return fmt.Errorf("chromiumPath must be set when convertBody is 'pdf'")
+		}
+		info, err := os.Stat(c.ChromiumPath)
+		if os.IsNotExist(err) {
+			return fmt.Errorf("chromiumPath executable not found at: %s", c.ChromiumPath)
+		}
+		if err != nil {
+			return fmt.Errorf("error checking chromiumPath '%s': %w", c.ChromiumPath, err)
+		}
+		if info.IsDir() {
+			return fmt.Errorf("chromiumPath '%s' is a directory, not an executable", c.ChromiumPath)
+		}
+		// In Unix-like systems, check for execute permission.
+		// This check is basic and might not be sufficient for all environments (e.g., Windows).
+		if info.Mode()&0111 == 0 {
+			return fmt.Errorf("chromiumPath '%s' is not executable", c.ChromiumPath)
+		}
 	}
 
 	return nil
