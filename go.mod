@@ -19,3 +19,5 @@ require (
 	github.com/ysmood/leakless v0.9.0 // indirect
 	golang.org/x/sys v0.36.0 // indirect
 )
+
+replace github.com/ysmood/fetchup => github.com/ysmood/fetchup v0.3.0
