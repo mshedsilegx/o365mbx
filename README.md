@@ -1,6 +1,6 @@
 # O365 Mailbox Downloader
 
-`o365mbx` is a command-line application written in Go to download emails and attachments from Microsoft Office 365 (O365) mailboxes using the Microsoft Graph API.
+`o365mbx` is a command-line application written in Go to download emails and attachments from Microsoft Office 365 (O365) mailboxes using the Microsoft Graph API. It leverages the official Microsoft Graph SDK for Go to ensure reliable and efficient communication with the API.
 
 It is designed for high-performance, parallelized downloading and is robust and efficient, with features for handling large mailboxes, large attachments, and transient network errors.
 
@@ -12,8 +12,7 @@ It is designed for high-performance, parallelized downloading and is robust and 
 *   **HTML to Plain Text Conversion**: Cleans email bodies by converting HTML to plain text, preserving links and image alt text.
 *   **Incremental Downloads**: Performs incremental downloads by saving the timestamp of the last run, fetching only new emails since that time.
 *   **Robust Error Handling**: Implements custom error types for better error identification and handling.
-*   **Configurable Retry Mechanism**: Includes an exponential backoff retry mechanism for transient network errors and API rate limiting.
-*   **Efficient Large Attachment Handling**: Uses chunked downloads for large attachments to avoid timeouts and reduce memory usage.
+*   **Configurable Retry Mechanism**: Uses the Microsoft Graph SDK's built-in retry mechanism to handle transient network errors and API rate limiting.
 *   **Flexible Configuration**: Supports configuration via both a JSON file and command-line arguments, with arguments overriding file settings.
 *   **Bandwidth Limiting**: Allows throttling of download bandwidth to avoid hitting data egress limits on large-scale downloads.
 *   **Secure Token Management**: Provides multiple, mutually exclusive options for securely supplying the access token.
@@ -156,8 +155,6 @@ All configuration options can be controlled via command-line arguments. Any flag
 | **Performance & Limits**        |                                                                           |          |         |
 | `-parallel`                     | Maximum number of parallel workers.                                       | No       | `10`    |
 | `-timeout`                      | HTTP client timeout in seconds.                                           | No       | `120`   |
-| `-max-retries`                  | Maximum number of retries for failed API calls.                           | No       | `2`     |
-| `-initial-backoff-seconds`      | Initial backoff in seconds for retries.                                   | No       | `5`     |
 | `-api-rate`                     | API calls per second for client-side rate limiting.                       | No       | `5.0`   |
 | `-api-burst`                    | API burst capacity for client-side rate limiting.                         | No       | `10`    |
 | `-bandwidth-limit-mbs`          | Bandwidth limit in MB/s for downloads (0 for disabled).                   | No       | `0.0`   |
@@ -183,8 +180,6 @@ For a more permanent setup, you can use a JSON file (e.g., `config.json`) and pa
   "processedFolder": "Processed-Archive",
   "errorFolder": "Error-Items",
   "httpClientTimeoutSeconds": 180,
-  "maxRetries": 3,
-  "initialBackoffSeconds": 10,
   "largeAttachmentThresholdMB": 25,
   "chunkSizeMB": 10,
   "maxParallelDownloads": 15,
@@ -214,8 +209,6 @@ For a more permanent setup, you can use a JSON file (e.g., `config.json`) and pa
     *   `errorFolder`: (String) The destination folder for messages that failed processing in `route` mode.
 *   **HTTP and API**:
     *   `httpClientTimeoutSeconds`: (Integer) Timeout in seconds for HTTP requests.
-    *   `maxRetries`: (Integer) Maximum number of retries for failed API requests.
-    *   `initialBackoffSeconds`: (Integer) Initial backoff duration in seconds.
     *   `maxParallelDownloads`: (Integer) The maximum number of concurrent workers.
     *   `apiCallsPerSecond`: (Float) The number of API calls allowed per second.
     *   `apiBurst`: (Integer) The burst capacity for the API rate limiter.
