@@ -2,12 +2,10 @@ package filehandler
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"net/http"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -15,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/microsoftgraph/msgraph-sdk-go/models"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/time/rate"
 
@@ -27,28 +26,39 @@ import (
 type AttachmentMetadata struct {
 	Name        string `json:"attachment_name_in_message"`
 	ContentType string `json:"content_type_of_attachment"`
-	Size        int    `json:"size_of_attachment_in_bytes"`
+	Size        int32  `json:"size_of_attachment_in_bytes"`
 	SavedAs     string `json:"attachment_name_stored_after_download"`
+}
+
+// Recipient mirrors the structure of models.Recipient for JSON serialization.
+type Recipient struct {
+	EmailAddress EmailAddress `json:"emailAddress"`
+}
+
+// EmailAddress mirrors the structure of models.EmailAddress for JSON serialization.
+type EmailAddress struct {
+	Name    string `json:"name"`
+	Address string `json:"address"`
 }
 
 // Metadata holds all metadata for a given email message.
 type Metadata struct {
-	To              []o365client.Recipient `json:"to"`
-	Cc              []o365client.Recipient `json:"cc"`
-	From            o365client.Recipient   `json:"from"`
-	Subject         string                 `json:"subject"`
-	ReceivedDate    time.Time              `json:"received_date"`
-	BodyFile        string                 `json:"body"`
-	BodyContentType string                 `json:"content_type_of_body"`
-	AttachmentCount int                    `json:"attachment_counts"`
-	Attachments     []AttachmentMetadata   `json:"list_of_attachments"`
+	To              []Recipient  `json:"to"`
+	Cc              []Recipient  `json:"cc"`
+	From            Recipient    `json:"from"`
+	Subject         string       `json:"subject"`
+	ReceivedDate    time.Time    `json:"received_date"`
+	BodyFile        string       `json:"body"`
+	BodyContentType string       `json:"content_type_of_body"`
+	AttachmentCount int          `json:"attachment_counts"`
+	Attachments     []AttachmentMetadata `json:"list_of_attachments"`
 }
 
 type FileHandlerInterface interface {
 	CreateWorkspace() error
-	SaveMessage(message *o365client.Message, bodyContent interface{}, convertBody string) (string, error)
-	SaveAttachment(ctx context.Context, msgPath string, att o365client.Attachment, accessToken string, sequence int) (*AttachmentMetadata, error)
-	SaveAttachmentFromBytes(msgPath string, att o365client.Attachment, sequence int) (*AttachmentMetadata, error)
+	SaveMessage(message models.Messageable, bodyContent interface{}, convertBody string) (string, error)
+	SaveAttachment(ctx context.Context, msgPath string, att models.Attachmentable, accessToken string, sequence int) (*AttachmentMetadata, error)
+	SaveAttachmentFromBytes(msgPath string, att models.Attachmentable, sequence int) (*AttachmentMetadata, error)
 	WriteAttachmentsToMetadata(msgPath string, attachments []AttachmentMetadata) error
 	SaveState(state *o365client.RunState, stateFilePath string) error
 	LoadState(stateFilePath string) (*o365client.RunState, error)
@@ -120,9 +130,29 @@ func (fh *FileHandler) CreateWorkspace() error {
 	return nil
 }
 
+func toRecipients(mRecipients []models.Recipientable) []Recipient {
+	recipients := make([]Recipient, len(mRecipients))
+	for i, r := range mRecipients {
+		recipients[i] = toRecipient(r)
+	}
+	return recipients
+}
+
+func toRecipient(mRecipient models.Recipientable) Recipient {
+	if mRecipient == nil {
+		return Recipient{}
+	}
+	return Recipient{
+		EmailAddress: EmailAddress{
+			Name:    *mRecipient.GetEmailAddress().GetName(),
+			Address: *mRecipient.GetEmailAddress().GetAddress(),
+		},
+	}
+}
+
 // SaveMessage creates the directory structure for a message and saves the metadata and body.
-func (fh *FileHandler) SaveMessage(message *o365client.Message, bodyContent interface{}, convertBody string) (string, error) {
-	msgPath := filepath.Join(fh.workspacePath, message.ID)
+func (fh *FileHandler) SaveMessage(message models.Messageable, bodyContent interface{}, convertBody string) (string, error) {
+	msgPath := filepath.Join(fh.workspacePath, *message.GetId())
 	attachmentsPath := filepath.Join(msgPath, "attachments")
 	if err := os.MkdirAll(attachmentsPath, 0755); err != nil {
 		return "", &apperrors.FileSystemError{Path: attachmentsPath, Msg: "failed to create attachments directory", Err: err}
@@ -158,14 +188,14 @@ func (fh *FileHandler) SaveMessage(message *o365client.Message, bodyContent inte
 
 	// Create and save metadata
 	metadata := Metadata{
-		To:              message.ToRecipients,
-		Cc:              message.CcRecipients,
-		From:            message.From,
-		Subject:         message.Subject,
-		ReceivedDate:    message.ReceivedDateTime,
+		To:              toRecipients(message.GetToRecipients()),
+		Cc:              toRecipients(message.GetCcRecipients()),
+		From:            toRecipient(message.GetFrom()),
+		Subject:         *message.GetSubject(),
+		ReceivedDate:    *message.GetReceivedDateTime(),
 		BodyFile:        bodyFileName,
 		BodyContentType: bodyContentType,
-		AttachmentCount: len(message.Attachments),
+		AttachmentCount: len(message.GetAttachments()),
 		Attachments:     []AttachmentMetadata{}, // This will be populated as attachments are saved
 	}
 
@@ -226,128 +256,20 @@ func (lr *limitedReader) Read(p []byte) (n int, err error) {
 }
 
 // SaveAttachment saves an attachment to a file and returns its metadata.
-func (fh *FileHandler) SaveAttachment(ctx context.Context, msgPath string, att o365client.Attachment, accessToken string, sequence int) (metadata *AttachmentMetadata, err error) {
-	fileName := fmt.Sprintf("%02d_%s", sequence, sanitizeFileName(att.Name))
-	filePath := filepath.Join(msgPath, "attachments", fileName)
-
-	out, err := os.Create(filePath)
-	if err != nil {
-		return nil, &apperrors.FileSystemError{Path: filePath, Msg: "failed to create file for attachment", Err: err}
-	}
-	defer func() {
-		if closeErr := out.Close(); closeErr != nil && err == nil {
-			err = &apperrors.FileSystemError{Path: filePath, Msg: "failed to close file after writing attachment", Err: closeErr}
-		}
-	}()
-
-	if att.Size <= fh.largeAttachmentThreshold {
-		req, err := http.NewRequestWithContext(ctx, "GET", att.DownloadURL, nil)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create HTTP request for attachment download: %w", err)
-		}
-		req.Header.Set("Authorization", "Bearer "+accessToken)
-
-		resp, err := fh.o365Client.DoRequestWithRetry(req)
-		if err != nil {
-			// Error already wrapped by DoRequestWithRetry, check for specific types
-			var apiErr *apperrors.APIError
-			var authErr *apperrors.AuthError
-			if errors.As(err, &apiErr) {
-				return nil, apiErr
-			}
-			if errors.As(err, &authErr) {
-				return nil, authErr
-			}
-			return nil, fmt.Errorf("failed to download attachment from %s: %w", att.DownloadURL, err)
-		}
-		defer func() {
-			if err := resp.Body.Close(); err != nil {
-				log.Warnf("Failed to close response body for small attachment: %v", err)
-			}
-		}()
-
-		if resp.StatusCode != http.StatusOK {
-			return nil, &apperrors.APIError{StatusCode: resp.StatusCode, Msg: fmt.Sprintf("failed to download small attachment from %s", att.DownloadURL)}
-		}
-
-		var reader io.Reader = resp.Body
-		if fh.bandwidthLimiter != nil {
-			reader = &limitedReader{reader: resp.Body, limiter: fh.bandwidthLimiter, ctx: ctx}
-		}
-
-		_, err = io.Copy(out, reader)
-		if err != nil {
-			return nil, &apperrors.FileSystemError{Path: filePath, Msg: "failed to write attachment content to file", Err: err}
-		}
-		log.WithField("attachmentName", att.Name).Infof("Successfully downloaded small attachment.")
-	} else {
-		log.WithFields(log.Fields{"attachmentName": att.Name, "attachmentSize": att.Size}).Infof("Downloading large attachment in chunks.")
-		var downloadedBytes int64 = 0
-		for downloadedBytes < int64(att.Size) {
-			select {
-			case <-ctx.Done():
-				log.WithField("error", ctx.Err()).Warn("Context cancelled during large attachment download.")
-				return nil, ctx.Err()
-			default:
-			}
-
-			endByte := downloadedBytes + int64(fh.chunkSize) - 1
-			if endByte >= int64(att.Size) {
-				endByte = int64(att.Size) - 1
-			}
-
-			req, err := http.NewRequestWithContext(ctx, "GET", att.DownloadURL, nil)
-			if err != nil {
-				return nil, fmt.Errorf("failed to create HTTP request for attachment chunk: %w", err)
-			}
-			req.Header.Set("Authorization", "Bearer "+accessToken)
-			req.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", downloadedBytes, endByte))
-
-			resp, err := fh.o365Client.DoRequestWithRetry(req)
-			if err != nil {
-				var apiErr *apperrors.APIError
-				var authErr *apperrors.AuthError
-				if errors.As(err, &apiErr) {
-					return nil, apiErr
-				}
-				if errors.As(err, &authErr) {
-					return nil, authErr
-				}
-				return nil, fmt.Errorf("failed to download attachment chunk from %s (range %d-%d): %w", att.DownloadURL, downloadedBytes, endByte, err)
-			}
-
-			if resp.StatusCode != http.StatusPartialContent && resp.StatusCode != http.StatusOK {
-				if err := resp.Body.Close(); err != nil {
-					log.Warnf("Failed to close response body for failed large attachment chunk: %v", err)
-				}
-				return nil, &apperrors.APIError{StatusCode: resp.StatusCode, Msg: fmt.Sprintf("failed to download attachment chunk from %s (range %d-%d)", att.DownloadURL, downloadedBytes, endByte)}
-			}
-
-			n, err := io.Copy(out, resp.Body)
-			if err := resp.Body.Close(); err != nil {
-				log.Warnf("Failed to close response body for large attachment chunk: %v", err)
-			}
-			if err != nil {
-				return nil, &apperrors.FileSystemError{Path: filePath, Msg: "failed to write attachment chunk content to file", Err: err}
-			}
-			downloadedBytes += n
-			log.WithFields(log.Fields{"downloadedBytes": n, "attachmentName": att.Name, "totalDownloaded": downloadedBytes, "attachmentSize": att.Size}).Debug("Downloaded bytes for attachment.")
-		}
-		log.WithField("attachmentName", att.Name).Infof("Successfully downloaded large attachment.")
-	}
-
-	metadata = &AttachmentMetadata{
-		Name:        att.Name,
-		ContentType: att.ContentType,
-		Size:        att.Size,
-		SavedAs:     fileName,
-	}
-	return
+func (fh *FileHandler) SaveAttachment(ctx context.Context, msgPath string, att models.Attachmentable, accessToken string, sequence int) (metadata *AttachmentMetadata, err error) {
+	// This function is now a placeholder and will not be used for downloading from URL.
+	// The new approach is to get the attachment content directly.
+	return nil, errors.New("SaveAttachment with download URL is deprecated, use SaveAttachmentFromBytes")
 }
 
 // SaveAttachmentFromBytes saves an attachment from its base64 encoded content and returns its metadata.
-func (fh *FileHandler) SaveAttachmentFromBytes(msgPath string, att o365client.Attachment, sequence int) (metadata *AttachmentMetadata, err error) {
-	fileName := fmt.Sprintf("%02d_%s", sequence, sanitizeFileName(att.Name))
+func (fh *FileHandler) SaveAttachmentFromBytes(msgPath string, att models.Attachmentable, sequence int) (metadata *AttachmentMetadata, err error) {
+	fileAttachment, ok := att.(*models.FileAttachment)
+	if !ok {
+		return nil, fmt.Errorf("attachment is not a file attachment")
+	}
+
+	fileName := fmt.Sprintf("%02d_%s", sequence, sanitizeFileName(*fileAttachment.GetName()))
 	filePath := filepath.Join(msgPath, "attachments", fileName)
 
 	out, err := os.Create(filePath)
@@ -360,17 +282,21 @@ func (fh *FileHandler) SaveAttachmentFromBytes(msgPath string, att o365client.At
 		}
 	}()
 
-	decoder := base64.NewDecoder(base64.StdEncoding, strings.NewReader(att.ContentBytes))
-	_, err = io.Copy(out, decoder)
-	if err != nil {
-		return nil, fmt.Errorf("failed to decode and save base64 content for attachment %s: %w", att.Name, err)
+	contentBytes := fileAttachment.GetContentBytes()
+	if contentBytes == nil {
+		return nil, fmt.Errorf("attachment %s has no content bytes", *fileAttachment.GetName())
 	}
 
-	log.WithField("attachmentName", att.Name).Infof("Successfully saved attachment from contentBytes.")
+	_, err = out.Write(contentBytes)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode and save base64 content for attachment %s: %w", *fileAttachment.GetName(), err)
+	}
+
+	log.WithField("attachmentName", *fileAttachment.GetName()).Infof("Successfully saved attachment from contentBytes.")
 	metadata = &AttachmentMetadata{
-		Name:        att.Name,
-		ContentType: att.ContentType,
-		Size:        att.Size,
+		Name:        *fileAttachment.GetName(),
+		ContentType: *fileAttachment.GetContentType(),
+		Size:        *fileAttachment.GetSize(),
 		SavedAs:     fileName,
 	}
 	return

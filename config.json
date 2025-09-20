@@ -1,0 +1,14 @@
+{
+    "mailbox": "test@example.com",
+    "workspace": "/tmp/o365_test",
+    "processing_mode": "incremental",
+    "inbox_folder": "Inbox",
+    "state": "state.json",
+    "timeout": 60,
+    "parallel": 4,
+    "api_rate": 10,
+    "api_burst": 10,
+    "max_retries": 3,
+    "initial_backoff_seconds": 5,
+    "debug": true
+}

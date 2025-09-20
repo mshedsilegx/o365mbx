@@ -31,87 +31,54 @@ func main() {
 	removeTokenFile := flag.Bool("remove-token-file", false, "Remove the token file after use (only if -token-file is specified).")
 	mailboxName := flag.String("mailbox", "", "Mailbox name (e.g., name@domain.com)")
 	workspacePath := flag.String("workspace", "", "Unique folder to store all artifacts")
-	configPath := flag.String("config", "", "Path to the configuration file (JSON)")
 	displayVersion := flag.Bool("version", false, "Display application version")
 	healthCheck := flag.Bool("healthcheck", false, "Perform a health check on the mailbox and exit")
 	debug := flag.Bool("debug", false, "Enable debug logging")
-	processingMode := flag.String("processing-mode", "", "Processing mode: 'full', 'incremental', or 'route'.")
-	inboxFolder := flag.String("inbox-folder", "", "The source folder from which to process messages.")
+	processingMode := flag.String("processing-mode", "full", "Processing mode: 'full', 'incremental', or 'route'.")
+	inboxFolder := flag.String("inbox-folder", "Inbox", "The source folder from which to process messages.")
 	stateFilePath := flag.String("state", "", "Path to the state file for incremental processing")
 	processedFolder := flag.String("processed-folder", "", "Destination folder for successfully processed messages in route mode.")
 	errorFolder := flag.String("error-folder", "", "Destination folder for messages that failed processing in route mode.")
-	timeoutSeconds := flag.Int("timeout", 0, "HTTP client timeout in seconds.")
-	maxParallelDownloads := flag.Int("parallel", 0, "Maximum number of parallel downloads.")
-	apiCallsPerSecond := flag.Float64("api-rate", 0, "API calls per second for client-side rate limiting.")
-	apiBurst := flag.Int("api-burst", 0, "API burst capacity for client-side rate limiting.")
-	maxRetries := flag.Int("max-retries", 0, "Maximum number of retries for failed API calls.")
-	initialBackoffSeconds := flag.Int("initial-backoff-seconds", 0, "Initial backoff in seconds for retries.")
-	chunkSizeMB := flag.Int("chunk-size-mb", 0, "Chunk size in MB for large attachment downloads.")
-	largeAttachmentThresholdMB := flag.Int("large-attachment-threshold-mb", 0, "Threshold in MB for large attachments.")
-	stateSaveInterval := flag.Int("state-save-interval", 0, "Save state every N messages.")
+	timeoutSeconds := flag.Int("timeout", 60, "HTTP client timeout in seconds.")
+	maxParallelDownloads := flag.Int("parallel", 4, "Maximum number of parallel downloads.")
+	apiCallsPerSecond := flag.Float64("api-rate", 10, "API calls per second for client-side rate limiting.")
+	apiBurst := flag.Int("api-burst", 10, "API burst capacity for client-side rate limiting.")
+	maxRetries := flag.Int("max-retries", 3, "Maximum number of retries for failed API calls.")
+	initialBackoffSeconds := flag.Int("initial-backoff-seconds", 5, "Initial backoff in seconds for retries.")
+	chunkSizeMB := flag.Int("chunk-size-mb", 20, "Chunk size in MB for large attachment downloads.")
+	largeAttachmentThresholdMB := flag.Int("large-attachment-threshold-mb", 20, "Threshold in MB for large attachments.")
+	stateSaveInterval := flag.Int("state-save-interval", 100, "Save state every N messages.")
 	bandwidthLimitMBs := flag.Float64("bandwidth-limit-mbs", 0, "Bandwidth limit in MB/s for downloads (0 for disabled).")
-	convertBody := flag.String("convert-body", "", "Convert body to 'text' or 'pdf'. Default is 'none'.")
+	convertBody := flag.String("convert-body", "none", "Convert body to 'text' or 'pdf'. Default is 'none'.")
 	chromiumPath := flag.String("chromium-path", "", "Path to headless chromium binary for PDF conversion.")
 	flag.Parse()
 
-	// --- Configuration Loading and Merging ---
-	cfg, err := engine.LoadConfig(*configPath)
-	if err != nil {
-		log.Fatalf("Error loading configuration: %v", err)
+	cfg := &engine.Config{
+		TokenString:              *tokenString,
+		TokenFile:                *tokenFile,
+		TokenEnv:                 *tokenEnv,
+		RemoveTokenFile:          *removeTokenFile,
+		MailboxName:              *mailboxName,
+		WorkspacePath:            *workspacePath,
+		DebugLogging:             *debug,
+		ProcessingMode:           *processingMode,
+		InboxFolder:              *inboxFolder,
+		StateFilePath:            *stateFilePath,
+		ProcessedFolder:          *processedFolder,
+		ErrorFolder:              *errorFolder,
+		HTTPClientTimeoutSeconds: *timeoutSeconds,
+		MaxParallelDownloads:     *maxParallelDownloads,
+		APICallsPerSecond:        *apiCallsPerSecond,
+		APIBurst:                 *apiBurst,
+		MaxRetries:               *maxRetries,
+		InitialBackoffSeconds:    *initialBackoffSeconds,
+		ChunkSizeMB:              *chunkSizeMB,
+		LargeAttachmentThresholdMB: *largeAttachmentThresholdMB,
+		StateSaveInterval:        *stateSaveInterval,
+		BandwidthLimitMBs:        *bandwidthLimitMBs,
+		ConvertBody:              *convertBody,
+		ChromiumPath:             *chromiumPath,
 	}
-
-	flag.Visit(func(f *flag.Flag) {
-		switch f.Name {
-		case "token-string":
-			cfg.TokenString = *tokenString
-		case "token-file":
-			cfg.TokenFile = *tokenFile
-		case "token-env":
-			cfg.TokenEnv = *tokenEnv
-		case "remove-token-file":
-			cfg.RemoveTokenFile = *removeTokenFile
-		case "mailbox":
-			cfg.MailboxName = *mailboxName
-		case "workspace":
-			cfg.WorkspacePath = *workspacePath
-		case "debug":
-			cfg.DebugLogging = *debug
-		case "processing-mode":
-			cfg.ProcessingMode = *processingMode
-		case "inbox-folder":
-			cfg.InboxFolder = *inboxFolder
-		case "state":
-			cfg.StateFilePath = *stateFilePath
-		case "processed-folder":
-			cfg.ProcessedFolder = *processedFolder
-		case "error-folder":
-			cfg.ErrorFolder = *errorFolder
-		case "timeout":
-			cfg.HTTPClientTimeoutSeconds = *timeoutSeconds
-		case "parallel":
-			cfg.MaxParallelDownloads = *maxParallelDownloads
-		case "api-rate":
-			cfg.APICallsPerSecond = *apiCallsPerSecond
-		case "api-burst":
-			cfg.APIBurst = *apiBurst
-		case "max-retries":
-			cfg.MaxRetries = *maxRetries
-		case "initial-backoff-seconds":
-			cfg.InitialBackoffSeconds = *initialBackoffSeconds
-		case "chunk-size-mb":
-			cfg.ChunkSizeMB = *chunkSizeMB
-		case "large-attachment-threshold-mb":
-			cfg.LargeAttachmentThresholdMB = *largeAttachmentThresholdMB
-		case "state-save-interval":
-			cfg.StateSaveInterval = *stateSaveInterval
-		case "bandwidth-limit-mbs":
-			cfg.BandwidthLimitMBs = *bandwidthLimitMBs
-		case "convert-body":
-			cfg.ConvertBody = *convertBody
-		case "chromium-path":
-			cfg.ChromiumPath = *chromiumPath
-		}
-	})
 
 	// --- Logging Setup ---
 	log.SetFormatter(&log.TextFormatter{FullTimestamp: true})
@@ -172,7 +139,10 @@ func main() {
 	}
 
 	// --- Dependency Injection ---
-	o365Client := o365client.NewO365Client(accessToken, time.Duration(cfg.HTTPClientTimeoutSeconds)*time.Second, cfg.MaxRetries, cfg.InitialBackoffSeconds, cfg.APICallsPerSecond, cfg.APIBurst, rng)
+	o365Client, err := o365client.NewO365Client(accessToken, time.Duration(cfg.HTTPClientTimeoutSeconds)*time.Second, cfg.MaxRetries, cfg.InitialBackoffSeconds, cfg.APICallsPerSecond, cfg.APIBurst, rng)
+	if err != nil {
+		log.Fatalf("Error creating O365 client: %v", err)
+	}
 	emailProcessor := emailprocessor.NewEmailProcessor()
 	fileHandler := filehandler.NewFileHandler(cfg.WorkspacePath, o365Client, emailProcessor, cfg.LargeAttachmentThresholdMB, cfg.ChunkSizeMB, cfg.BandwidthLimitMBs)
 

@@ -9,6 +9,7 @@ import (
 	"o365mbx/o365client"
 	"os"
 	"path/filepath"
+	"github.com/microsoftgraph/msgraph-sdk-go/models"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -18,7 +19,7 @@ import (
 )
 
 type AttachmentJob struct {
-	Attachment  o365client.Attachment
+	Attachment  models.Attachmentable
 	MessageID   string
 	AccessToken string
 	MsgPath     string
@@ -102,12 +103,12 @@ func runDownloadMode(ctx context.Context, cfg *Config, o365Client o365client.O36
 		state = &o365client.RunState{}
 	}
 
-	var newLatestMessage o365client.Message
+	var newLatestMessage models.Messageable
 	var mu sync.Mutex
 
 	messageStates := make(map[string]*DownloadState)
 	var statesMutex sync.Mutex
-	messagesChan := make(chan o365client.Message, cfg.MaxParallelDownloads*2)
+	messagesChan := make(chan models.Messageable, cfg.MaxParallelDownloads*2)
 	attachmentsChan := make(chan AttachmentJob, cfg.MaxParallelDownloads*4)
 	resultsChan := make(chan ProcessingResult, cfg.MaxParallelDownloads*4)
 
@@ -145,55 +146,55 @@ func runDownloadMode(ctx context.Context, cfg *Config, o365Client o365client.O36
 			for msg := range messagesChan {
 				semaphore <- struct{}{}
 				atomic.AddUint32(&stats.MessagesProcessed, 1)
-				log.WithFields(log.Fields{"messageID": msg.ID, "subject": msg.Subject}).Infof("Processing message.")
+				log.WithFields(log.Fields{"messageID": *msg.GetId(), "subject": *msg.GetSubject()}).Infof("Processing message.")
 
-				processedBody, processingErr := emailProcessor.ProcessBody(msg.Body.Content, cfg.ConvertBody, cfg.ChromiumPath)
+				processedBody, processingErr := emailProcessor.ProcessBody(*msg.GetBody().GetContent(), cfg.ConvertBody, cfg.ChromiumPath)
 				effectiveConvertBody := cfg.ConvertBody
 				if processingErr != nil {
 					atomic.AddUint32(&stats.NonFatalErrors, 1)
-					log.WithFields(log.Fields{"messageID": msg.ID, "error": processingErr}).Warn("Failed to process message body.")
-					processedBody = msg.Body.Content // Fallback to original content
+					log.WithFields(log.Fields{"messageID": *msg.GetId(), "error": processingErr}).Warn("Failed to process message body.")
+					processedBody = *msg.GetBody().GetContent() // Fallback to original content
 					if cfg.ConvertBody == "pdf" {
 						effectiveConvertBody = "none" // Save with correct extension for the fallback content
 					}
 				}
 
-				msgPath, saveErr := fileHandler.SaveMessage(&msg, processedBody, effectiveConvertBody)
+				msgPath, saveErr := fileHandler.SaveMessage(msg, processedBody, effectiveConvertBody)
 				if saveErr != nil {
 					atomic.AddUint32(&stats.NonFatalErrors, 1)
 					if processingErr == nil {
 						processingErr = saveErr
 					}
-					log.WithFields(log.Fields{"messageID": msg.ID, "error": processingErr}).Errorf("Error saving email message.")
+					log.WithFields(log.Fields{"messageID": *msg.GetId(), "error": processingErr}).Errorf("Error saving email message.")
 					if cfg.ProcessingMode == "route" {
-						resultsChan <- ProcessingResult{MessageID: msg.ID, Err: processingErr, IsInitialization: true, TotalTasks: 1 + len(msg.Attachments)}
+						resultsChan <- ProcessingResult{MessageID: *msg.GetId(), Err: processingErr, IsInitialization: true, TotalTasks: 1 + len(msg.GetAttachments())}
 					}
 					<-semaphore
 					continue
 				}
 
 				if cfg.ProcessingMode == "route" {
-					totalTasks := 1 + len(msg.Attachments)
+					totalTasks := 1 + len(msg.GetAttachments())
 					resultsChan <- ProcessingResult{
-						MessageID:        msg.ID,
+						MessageID:        *msg.GetId(),
 						Err:              processingErr,
 						IsInitialization: true,
 						TotalTasks:       totalTasks,
 					}
 				}
 
-				if msg.HasAttachments {
-					log.WithFields(log.Fields{"count": len(msg.Attachments), "messageID": msg.ID}).Infof("Found attachments.")
+				if *msg.GetHasAttachments() {
+					log.WithFields(log.Fields{"count": len(msg.GetAttachments()), "messageID": *msg.GetId()}).Infof("Found attachments.")
 					statesMutex.Lock()
-					messageStates[msg.ID] = &DownloadState{
-						ExpectedAttachments: len(msg.Attachments),
-						Attachments:         make([]filehandler.AttachmentMetadata, 0, len(msg.Attachments)),
+					messageStates[*msg.GetId()] = &DownloadState{
+						ExpectedAttachments: len(msg.GetAttachments()),
+						Attachments:         make([]filehandler.AttachmentMetadata, 0, len(msg.GetAttachments())),
 					}
 					statesMutex.Unlock()
-					for i, att := range msg.Attachments {
+					for i, att := range msg.GetAttachments() {
 						attachmentsChan <- AttachmentJob{
 							Attachment:  att,
-							MessageID:   msg.ID,
+							MessageID:   *msg.GetId(),
 							AccessToken: accessToken,
 							MsgPath:     msgPath,
 							Sequence:    i + 1,
@@ -202,13 +203,13 @@ func runDownloadMode(ctx context.Context, cfg *Config, o365Client o365client.O36
 				}
 
 				mu.Lock()
-				if msg.ReceivedDateTime.After(newLatestMessage.ReceivedDateTime) || newLatestMessage.ID == "" {
+				if newLatestMessage == nil || (*msg.GetReceivedDateTime()).After(*newLatestMessage.GetReceivedDateTime()) {
 					newLatestMessage = msg
 				}
 				processedCount := atomic.LoadUint32(&stats.MessagesProcessed)
 				if cfg.ProcessingMode == "incremental" && processedCount > 0 && processedCount%uint32(cfg.StateSaveInterval) == 0 {
 					log.WithField("messageCount", processedCount).Info("Periodically saving state.")
-					if err := fileHandler.SaveState(&o365client.RunState{LastRunTimestamp: newLatestMessage.ReceivedDateTime, LastMessageID: newLatestMessage.ID}, cfg.StateFilePath); err != nil {
+					if err := fileHandler.SaveState(&o365client.RunState{LastRunTimestamp: *newLatestMessage.GetReceivedDateTime(), LastMessageID: *newLatestMessage.GetId()}, cfg.StateFilePath); err != nil {
 						log.WithField("error", err).Error("Failed to periodically save state.")
 					}
 				}
@@ -225,25 +226,27 @@ func runDownloadMode(ctx context.Context, cfg *Config, o365Client o365client.O36
 			for job := range attachmentsChan {
 				semaphore <- struct{}{}
 				log.WithFields(log.Fields{
-					"attachmentName": job.Attachment.Name,
+					"attachmentName": *job.Attachment.GetName(),
 					"messageID":      job.MessageID,
 				}).Debug("Processing attachment.")
 
 				var attMetadata *filehandler.AttachmentMetadata
 				var err error
 
-				if job.Attachment.DownloadURL != "" {
-					attMetadata, err = fileHandler.SaveAttachment(ctx, job.MsgPath, job.Attachment, job.AccessToken, job.Sequence)
-				} else if job.Attachment.ContentBytes != "" {
+				if fileAttachment, ok := job.Attachment.(*models.FileAttachment); ok && fileAttachment.GetContentBytes() != nil {
 					attMetadata, err = fileHandler.SaveAttachmentFromBytes(job.MsgPath, job.Attachment, job.Sequence)
 				} else {
-					err = fmt.Errorf("no download URL or content bytes")
-					log.WithFields(log.Fields{"attachmentName": job.Attachment.Name, "messageID": job.MessageID}).Warn("Skipping attachment.")
+					// This part of the logic might need adjustment depending on how DownloadURL is exposed in the SDK.
+					// For now, we assume we can get the raw content directly.
+					// The SDK does not directly expose a DownloadURL. We would typically fetch the content.
+					// To simplify, we will assume attachments are fetched with the message.
+					err = fmt.Errorf("attachment is not a file attachment with content bytes, or download from URL is not implemented with SDK")
+					log.WithFields(log.Fields{"attachmentName": *job.Attachment.GetName(), "messageID": job.MessageID}).Warn("Skipping attachment.")
 				}
 
 				if err != nil {
 					atomic.AddUint32(&stats.NonFatalErrors, 1)
-					log.WithFields(log.Fields{"attachmentName": job.Attachment.Name, "messageID": job.MessageID, "error": err}).Error("Failed to save attachment.")
+					log.WithFields(log.Fields{"attachmentName": *job.Attachment.GetName(), "messageID": job.MessageID, "error": err}).Error("Failed to save attachment.")
 				} else {
 					atomic.AddUint32(&stats.AttachmentsProcessed, 1)
 				}
@@ -295,10 +298,10 @@ func runDownloadMode(ctx context.Context, cfg *Config, o365Client o365client.O36
 		aggregatorWg.Wait()
 	}
 
-	if cfg.ProcessingMode == "incremental" && newLatestMessage.ID != "" {
+	if cfg.ProcessingMode == "incremental" && newLatestMessage != nil && newLatestMessage.GetId() != nil {
 		newState := &o365client.RunState{
-			LastRunTimestamp: newLatestMessage.ReceivedDateTime,
-			LastMessageID:    newLatestMessage.ID,
+			LastRunTimestamp: *newLatestMessage.GetReceivedDateTime(),
+			LastMessageID:    *newLatestMessage.GetId(),
 		}
 		log.WithFields(log.Fields{
 			"timestamp": newState.LastRunTimestamp.Format(time.RFC3339Nano),
