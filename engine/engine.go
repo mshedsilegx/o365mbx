@@ -90,21 +90,15 @@ func runDownloadMode(ctx context.Context, cfg *Config, o365Client o365client.O36
 		if err != nil {
 			log.Fatalf("Error loading state file: %v", err)
 		}
-		if !state.LastRunTimestamp.IsZero() {
-			log.WithFields(log.Fields{
-				"lastRunTimestamp": state.LastRunTimestamp.Format(time.RFC3339Nano),
-				"lastMessageID":    state.LastMessageID,
-			}).Infof("Found previous state. Fetching emails since last run.")
+		if state.DeltaLink != "" {
+			log.WithField("deltaLink", state.DeltaLink).Infof("Found previous state. Fetching changes since last run.")
 		} else {
-			log.Info("No previous state found. Fetching all available emails.")
+			log.Info("No previous state found. Starting full synchronization.")
 		}
 	} else {
 		log.Info("Running in full or route mode. Fetching all available emails.")
 		state = &o365client.RunState{}
 	}
-
-	var newLatestMessage models.Messageable
-	var mu sync.Mutex
 
 	messageStates := make(map[string]*DownloadState)
 	var statesMutex sync.Mutex
@@ -202,18 +196,6 @@ func runDownloadMode(ctx context.Context, cfg *Config, o365Client o365client.O36
 					}
 				}
 
-				mu.Lock()
-				if newLatestMessage == nil || (*msg.GetReceivedDateTime()).After(*newLatestMessage.GetReceivedDateTime()) {
-					newLatestMessage = msg
-				}
-				processedCount := atomic.LoadUint32(&stats.MessagesProcessed)
-				if cfg.ProcessingMode == "incremental" && processedCount > 0 && processedCount%uint32(cfg.StateSaveInterval) == 0 {
-					log.WithField("messageCount", processedCount).Info("Periodically saving state.")
-					if err := fileHandler.SaveState(&o365client.RunState{LastRunTimestamp: *newLatestMessage.GetReceivedDateTime(), LastMessageID: *newLatestMessage.GetId()}, cfg.StateFilePath); err != nil {
-						log.WithField("error", err).Error("Failed to periodically save state.")
-					}
-				}
-				mu.Unlock()
 				<-semaphore
 			}
 		}()
@@ -298,16 +280,9 @@ func runDownloadMode(ctx context.Context, cfg *Config, o365Client o365client.O36
 		aggregatorWg.Wait()
 	}
 
-	if cfg.ProcessingMode == "incremental" && newLatestMessage != nil && newLatestMessage.GetId() != nil {
-		newState := &o365client.RunState{
-			LastRunTimestamp: *newLatestMessage.GetReceivedDateTime(),
-			LastMessageID:    *newLatestMessage.GetId(),
-		}
-		log.WithFields(log.Fields{
-			"timestamp": newState.LastRunTimestamp.Format(time.RFC3339Nano),
-			"messageID": newState.LastMessageID,
-		}).Debugln("Saving new state.")
-		if err := fileHandler.SaveState(newState, cfg.StateFilePath); err != nil {
+	if cfg.ProcessingMode == "incremental" && state.DeltaLink != "" {
+		log.WithField("deltaLink", state.DeltaLink).Info("Saving new state with delta link.")
+		if err := fileHandler.SaveState(state, cfg.StateFilePath); err != nil {
 			log.Errorf("Error saving state file: %v", err)
 		}
 	}

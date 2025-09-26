@@ -10,7 +10,6 @@ import (
 
 	abstractions "github.com/microsoft/kiota-abstractions-go"
 	msgraphsdk "github.com/microsoftgraph/msgraph-sdk-go"
-	msgraphgocore "github.com/microsoftgraph/msgraph-sdk-go-core"
 	"github.com/microsoftgraph/msgraph-sdk-go/models"
 	"github.com/microsoftgraph/msgraph-sdk-go/models/odataerrors"
 	"github.com/microsoftgraph/msgraph-sdk-go/users"
@@ -49,52 +48,70 @@ func NewO365Client(accessToken string, timeout time.Duration, maxRetries int, in
 	}, nil
 }
 
-// GetMessages fetches a list of messages for a given mailbox and streams them to a channel.
+// GetMessages fetches a list of messages for a given mailbox using delta query and streams them to a channel.
+// It updates the state with the new delta link after completion.
 func (c *O365Client) GetMessages(ctx context.Context, mailboxName, sourceFolderID string, state *RunState, messagesChan chan<- models.Messageable) error {
 	defer close(messagesChan)
 
-	headers := abstractions.NewRequestHeaders()
-	headers.Add("Prefer", "outlook.body-content-type=\"text\"")
+	var (
+		messagesResponse users.ItemMailFoldersItemMessagesDeltaResponseable
+		err              error
+	)
 
-	requestConfiguration := &users.ItemMailFoldersItemMessagesRequestBuilderGetRequestConfiguration{
-		Headers: headers,
-		QueryParameters: &users.ItemMailFoldersItemMessagesRequestBuilderGetQueryParameters{
-			Expand:  []string{"attachments"},
-			Select:  []string{"id", "subject", "receivedDateTime", "body", "hasAttachments", "from", "toRecipients", "ccRecipients"},
-			Orderby: []string{"receivedDateTime asc", "id asc"},
-		},
+	if state.DeltaLink == "" {
+		log.Info("No delta link found. Starting initial synchronization.")
+		headers := abstractions.NewRequestHeaders()
+		headers.Add("Prefer", "outlook.body-content-type=\"text\"")
+		requestConfiguration := &users.ItemMailFoldersItemMessagesDeltaRequestBuilderGetRequestConfiguration{
+			Headers: headers,
+			QueryParameters: &users.ItemMailFoldersItemMessagesDeltaRequestBuilderGetQueryParameters{
+				Expand: []string{"attachments"},
+				Select: []string{"id", "subject", "receivedDateTime", "body", "hasAttachments", "from", "toRecipients", "ccRecipients"},
+			},
+		}
+		messagesResponse, err = c.client.Users().ByUserId(mailboxName).MailFolders().ByMailFolderId(sourceFolderID).Messages().Delta().Get(ctx, requestConfiguration)
+	} else {
+		log.WithField("deltaLink", state.DeltaLink).Info("Found delta link. Fetching incremental changes.")
+		builder := users.NewItemMailFoldersItemMessagesDeltaRequestBuilder(state.DeltaLink, c.client.GetAdapter())
+		messagesResponse, err = builder.Get(ctx, nil)
 	}
 
-	if !state.LastRunTimestamp.IsZero() {
-		timestamp := state.LastRunTimestamp.Format(time.RFC3339Nano)
-		filter := fmt.Sprintf("receivedDateTime ge %s", timestamp)
-		requestConfiguration.QueryParameters.Filter = &filter
-	}
-
-	messages, err := c.client.Users().ByUserId(mailboxName).MailFolders().ByMailFolderId(sourceFolderID).Messages().Get(ctx, requestConfiguration)
 	if err != nil {
 		return handleError(err)
 	}
 
-	pageIterator, err := msgraphgocore.NewPageIterator[models.Messageable](messages, c.client.GetAdapter(), models.CreateMessageCollectionResponseFromDiscriminatorValue)
-	if err != nil {
-		return fmt.Errorf("failed to create page iterator: %w", err)
-	}
-
-	err = pageIterator.Iterate(ctx, func(message models.Messageable) bool {
-		select {
-		case <-ctx.Done():
-			log.WithField("error", ctx.Err()).Warn("Context cancelled during message streaming.")
-			return false // Stop iteration
-		case messagesChan <- message:
-			return true // Continue iteration
+	for {
+		pageMessages := messagesResponse.GetValue()
+		for _, message := range pageMessages {
+			select {
+			case <-ctx.Done():
+				log.Warn("Context cancelled during message streaming.")
+				return ctx.Err()
+			case messagesChan <- message:
+			}
 		}
-	})
 
-	if err != nil {
-		return fmt.Errorf("error iterating pages: %w", err)
+		nextLink := messagesResponse.GetOdataNextLink()
+		if nextLink == nil || *nextLink == "" {
+			deltaLink := messagesResponse.GetOdataDeltaLink()
+			if deltaLink != nil && *deltaLink != "" {
+				log.WithField("deltaLink", *deltaLink).Info("Captured new delta link for next run.")
+				state.DeltaLink = *deltaLink
+			} else {
+				log.Warn("Expected a delta link on the final page, but found none.")
+			}
+			break
+		}
+
+		log.Debug("Fetching next page of messages.")
+		builder := users.NewItemMailFoldersItemMessagesDeltaRequestBuilder(*nextLink, c.client.GetAdapter())
+		messagesResponse, err = builder.Get(ctx, nil)
+		if err != nil {
+			return handleError(err)
+		}
 	}
 
+	log.Info("Finished processing all message pages.")
 	return nil
 }
 
@@ -175,8 +192,7 @@ func (c *O365Client) MoveMessage(ctx context.Context, mailboxName, messageID, de
 
 // RunState represents the state of the last successful incremental run.
 type RunState struct {
-	LastRunTimestamp time.Time `json:"lastRunTimestamp"`
-	LastMessageID    string    `json:"lastMessageId"`
+	DeltaLink string `json:"deltaLink"`
 }
 
 // handleError converts odataerrors.ODataError to a more specific application error.

@@ -8,7 +8,6 @@ require (
 	github.com/go-rod/rod v0.116.2
 	github.com/microsoft/kiota-abstractions-go v1.9.3
 	github.com/microsoftgraph/msgraph-sdk-go v1.86.0
-	github.com/microsoftgraph/msgraph-sdk-go-core v1.4.0
 	github.com/sirupsen/logrus v1.9.3
 	golang.org/x/net v0.44.0
 	golang.org/x/time v0.13.0
@@ -26,6 +25,7 @@ require (
 	github.com/microsoft/kiota-serialization-json-go v1.1.2 // indirect
 	github.com/microsoft/kiota-serialization-multipart-go v1.1.2 // indirect
 	github.com/microsoft/kiota-serialization-text-go v1.1.3 // indirect
+	github.com/microsoftgraph/msgraph-sdk-go-core v1.4.0 // indirect
 	github.com/std-uritemplate/std-uritemplate/go/v2 v2.0.5 // indirect
 	github.com/ysmood/fetchup v0.5.2 // indirect
 	github.com/ysmood/goob v0.4.0 // indirect
