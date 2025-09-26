@@ -144,6 +144,19 @@ func runDownloadMode(ctx context.Context, cfg *Config, o365Client o365client.O36
 			defer processorWg.Done()
 			for msg := range messagesChan {
 				semaphore <- struct{}{}
+
+				// In incremental mode, the API returns messages with receivedDateTime >= last saved timestamp.
+				// This means the last message from the previous run will be included again.
+				// We must skip it to avoid processing it twice.
+				if cfg.ProcessingMode == "incremental" && !state.LastRunTimestamp.IsZero() && msg.ID == state.LastMessageID {
+					log.WithFields(log.Fields{
+						"messageID": msg.ID,
+						"reason":    "Skipping last message from previous run to prevent duplication",
+					}).Info("Skipping message.")
+					<-semaphore
+					continue
+				}
+
 				atomic.AddUint32(&stats.MessagesProcessed, 1)
 				log.WithFields(log.Fields{"messageID": msg.ID, "subject": msg.Subject}).Infof("Processing message.")
 
