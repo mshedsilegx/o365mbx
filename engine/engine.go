@@ -268,7 +268,6 @@ func runDownloadMode(ctx context.Context, cfg *Config, o365Client o365client.O36
 	}
 
 	producerWg.Wait()
-	close(messagesChan)
 
 	processorWg.Wait()
 	close(attachmentsChan)
