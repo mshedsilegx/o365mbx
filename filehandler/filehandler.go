@@ -43,14 +43,14 @@ type EmailAddress struct {
 
 // Metadata holds all metadata for a given email message.
 type Metadata struct {
-	To              []Recipient  `json:"to"`
-	Cc              []Recipient  `json:"cc"`
-	From            Recipient    `json:"from"`
-	Subject         string       `json:"subject"`
-	ReceivedDate    time.Time    `json:"received_date"`
-	BodyFile        string       `json:"body"`
-	BodyContentType string       `json:"content_type_of_body"`
-	AttachmentCount int          `json:"attachment_counts"`
+	To              []Recipient          `json:"to"`
+	Cc              []Recipient          `json:"cc"`
+	From            Recipient            `json:"from"`
+	Subject         string               `json:"subject"`
+	ReceivedDate    time.Time            `json:"received_date"`
+	BodyFile        string               `json:"body"`
+	BodyContentType string               `json:"content_type_of_body"`
+	AttachmentCount int                  `json:"attachment_counts"`
 	Attachments     []AttachmentMetadata `json:"list_of_attachments"`
 }
 
