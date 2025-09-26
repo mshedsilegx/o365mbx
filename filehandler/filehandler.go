@@ -238,23 +238,6 @@ func (fh *FileHandler) saveEmailBody(filePath string, bodyContent interface{}) e
 	return nil
 }
 
-// limitedReader is a wrapper around an io.Reader that applies a rate limit.
-type limitedReader struct {
-	reader  io.Reader
-	limiter *rate.Limiter
-	ctx     context.Context
-}
-
-func (lr *limitedReader) Read(p []byte) (n int, err error) {
-	n, err = lr.reader.Read(p)
-	if n > 0 {
-		if err := lr.limiter.WaitN(lr.ctx, n); err != nil {
-			return n, err
-		}
-	}
-	return
-}
-
 // SaveAttachment saves an attachment to a file and returns its metadata.
 func (fh *FileHandler) SaveAttachment(ctx context.Context, msgPath string, att models.Attachmentable, accessToken string, sequence int) (metadata *AttachmentMetadata, err error) {
 	// This function is now a placeholder and will not be used for downloading from URL.
