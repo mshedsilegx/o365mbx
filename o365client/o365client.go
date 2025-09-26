@@ -108,8 +108,8 @@ func (c *O365Client) GetMessages(ctx context.Context, mailboxName, sourceFolderI
 	}
 
 	params := url.Values{}
-	// Always sort by receivedDateTime and then by id for deterministic ordering.
-	params.Add("$orderby", "receivedDateTime asc, id asc")
+	// Always sort by receivedDateTime for deterministic ordering.
+	params.Add("$orderby", "receivedDateTime asc")
 	// Use $expand to fetch attachments along with the message data in a single call.
 	params.Add("$expand", "attachments")
 	// Use $select to specify exact fields, including To, From, and CC recipients.
