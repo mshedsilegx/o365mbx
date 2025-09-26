@@ -60,10 +60,9 @@ func (c *O365Client) GetMessages(ctx context.Context, mailboxName, sourceFolderI
 
 	if state.DeltaLink == "" {
 		log.Info("No delta link found. Starting initial synchronization.")
-		headers := abstractions.NewRequestHeaders()
-		headers.Add("Prefer", "outlook.body-content-type=\"text\"")
+		// By default, the API returns the body in HTML format.
+		// We omit the 'Prefer: outlook.body-content-type' header to get the full HTML.
 		requestConfiguration := &users.ItemMailFoldersItemMessagesDeltaRequestBuilderGetRequestConfiguration{
-			Headers: headers,
 			QueryParameters: &users.ItemMailFoldersItemMessagesDeltaRequestBuilderGetQueryParameters{
 				Expand: []string{"attachments"},
 				Select: []string{"id", "subject", "receivedDateTime", "body", "hasAttachments", "from", "toRecipients", "ccRecipients"},
