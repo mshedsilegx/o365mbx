@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -236,23 +235,6 @@ func (fh *FileHandler) saveEmailBody(filePath string, bodyContent interface{}) e
 		return &apperrors.FileSystemError{Path: filePath, Msg: "failed to save email body", Err: err}
 	}
 	return nil
-}
-
-// limitedReader is a wrapper around an io.Reader that applies a rate limit.
-type limitedReader struct {
-	reader  io.Reader
-	limiter *rate.Limiter
-	ctx     context.Context
-}
-
-func (lr *limitedReader) Read(p []byte) (n int, err error) {
-	n, err = lr.reader.Read(p)
-	if n > 0 {
-		if err := lr.limiter.WaitN(lr.ctx, n); err != nil {
-			return n, err
-		}
-	}
-	return
 }
 
 // SaveAttachment saves an attachment to a file and returns its metadata.
