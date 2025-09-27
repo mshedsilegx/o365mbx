@@ -54,7 +54,7 @@ func (c *O365Client) GetMessages(ctx context.Context, mailboxName, sourceFolderI
 	defer close(messagesChan)
 
 	var (
-		messagesResponse users.ItemMailFoldersItemMessagesDeltaResponseable
+		messagesResponse users.ItemMailFoldersItemMessagesDeltaGetResponseable
 		err              error
 	)
 
