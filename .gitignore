@@ -8,3 +8,7 @@ build.sh
 o365mbx
 *.exe
 *.test
+
+# Tests
+state.json
+token.jwt
