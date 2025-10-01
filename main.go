@@ -229,13 +229,11 @@ func runHealthCheckMode(ctx context.Context, client o365client.O365ClientInterfa
 	fmt.Printf("Mailbox: %s\n", mailboxName)
 	fmt.Println("------------------------------")
 	fmt.Printf("Total Messages: %d\n", stats.TotalMessages)
-	fmt.Printf("Total Mailbox Size: %d bytes\n", stats.TotalSize)
 	fmt.Println("------------------------------")
 	fmt.Println("\n--- Folder Statistics ---")
 	for _, folder := range stats.Folders {
 		fmt.Printf("  Folder: %s\n", folder.Name)
 		fmt.Printf("    - Items: %d\n", folder.TotalItems)
-		fmt.Printf("    - Size: %d bytes\n", folder.TotalSize)
 		if folder.LastItemDate != nil {
 			fmt.Printf("    - Last Message: %s\n", folder.LastItemDate.Format(time.RFC1123))
 		}

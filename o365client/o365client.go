@@ -9,7 +9,6 @@ import (
 
 	"o365mbx/apperrors"
 
-	abstractions "github.com/microsoft/kiota-abstractions-go"
 	msgraphsdk "github.com/microsoftgraph/msgraph-sdk-go"
 	"github.com/microsoftgraph/msgraph-sdk-go/models"
 	"github.com/microsoftgraph/msgraph-sdk-go/models/odataerrors"
@@ -20,13 +19,11 @@ import (
 type FolderStats struct {
 	Name         string
 	TotalItems   int32
-	TotalSize    int64
 	LastItemDate *time.Time
 }
 
 type MailboxHealthStats struct {
 	TotalMessages int32
-	TotalSize     int64
 	Folders       []FolderStats
 }
 
@@ -178,7 +175,6 @@ func (c *O365Client) GetMailboxHealthCheck(ctx context.Context, mailboxName stri
 		folderStat := FolderStats{
 			Name:       *folder.GetDisplayName(),
 			TotalItems: *folder.GetTotalItemCount(),
-			TotalSize:  *folder.GetSizeInBytes(),
 		}
 
 		// 2. If it's the Inbox, get the last message date
@@ -186,8 +182,8 @@ func (c *O365Client) GetMailboxHealthCheck(ctx context.Context, mailboxName stri
 			// Query for the most recent message
 			lastMessage, err := c.client.Users().ByUserId(mailboxName).MailFolders().ByMailFolderId(*folder.GetId()).Messages().Get(ctx, &users.ItemMailFoldersItemMessagesRequestBuilderGetRequestConfiguration{
 				QueryParameters: &users.ItemMailFoldersItemMessagesRequestBuilderGetQueryParameters{
-					Top:    Ptr(int32(1)),
-					Select: []string{"receivedDateTime"},
+					Top:     Ptr(int32(1)),
+					Select:  []string{"receivedDateTime"},
 					Orderby: []string{"receivedDateTime desc"},
 				},
 			})
@@ -200,7 +196,6 @@ func (c *O365Client) GetMailboxHealthCheck(ctx context.Context, mailboxName stri
 
 		stats.Folders = append(stats.Folders, folderStat)
 		stats.TotalMessages += folderStat.TotalItems
-		stats.TotalSize += folderStat.TotalSize
 	}
 
 	return stats, nil
