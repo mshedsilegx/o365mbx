@@ -25,6 +25,9 @@ func main() {
 	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
 
 	// --- Flag Definition ---
+	// Note: The -rod flag is not defined here but is handled by the underlying go-rod library.
+	// It is used to pass launch parameters to the headless chrome browser for PDF conversion.
+	// Example: -rod="--proxy-server=127.0.0.1:8080"
 	tokenString := flag.String("token-string", "", "JWT token as a string.")
 	tokenFile := flag.String("token-file", "", "Path to a file containing the JWT token.")
 	tokenEnv := flag.Bool("token-env", false, "Read JWT token from JWT_TOKEN environment variable.")
@@ -79,6 +82,8 @@ func main() {
 		ConvertBody:                *convertBody,
 		ChromiumPath:               *chromiumPath,
 	}
+
+	cfg.SetDefaults()
 
 	// --- Logging Setup ---
 	log.SetFormatter(&log.TextFormatter{FullTimestamp: true})
@@ -213,15 +218,25 @@ func isValidEmail(email string) bool {
 }
 
 func runHealthCheckMode(ctx context.Context, client o365client.O365ClientInterface, mailboxName string) {
-	log.WithField("mailbox", mailboxName).Info("Attempting to connect to mailbox and retrieve statistics...")
-	messageCount, err := client.GetMailboxStatistics(ctx, mailboxName)
+	log.WithField("mailbox", mailboxName).Info("Performing health check...")
+	stats, err := client.GetMailboxHealthCheck(ctx, mailboxName)
 	if err != nil {
-		log.Fatalf("O365 API error during connect check: %v", err)
+		log.Fatalf("O365 API error during health check: %v", err)
 	}
-	log.WithFields(log.Fields{
-		"mailbox":      mailboxName,
-		"messageCount": messageCount,
-	}).Info("Mailbox connectivity successful. Statistics:")
-	fmt.Printf("\nMailbox: %s\n", mailboxName)
-	fmt.Printf("Total Messages: %d\n", messageCount)
+
+	log.WithField("mailbox", mailboxName).Info("Health check successful.")
+	fmt.Println("\n--- Mailbox Health Check ---")
+	fmt.Printf("Mailbox: %s\n", mailboxName)
+	fmt.Println("------------------------------")
+	fmt.Printf("Total Messages: %d\n", stats.TotalMessages)
+	fmt.Println("------------------------------")
+	fmt.Println("\n--- Folder Statistics ---")
+	for _, folder := range stats.Folders {
+		fmt.Printf("  Folder: %s\n", folder.Name)
+		fmt.Printf("    - Items: %d\n", folder.TotalItems)
+		if folder.LastItemDate != nil {
+			fmt.Printf("    - Last Message: %s\n", folder.LastItemDate.Format(time.RFC1123))
+		}
+	}
+	fmt.Println("-------------------------")
 }

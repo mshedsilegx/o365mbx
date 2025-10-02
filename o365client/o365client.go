@@ -4,11 +4,11 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
+	"strings"
 	"time"
 
 	"o365mbx/apperrors"
 
-	abstractions "github.com/microsoft/kiota-abstractions-go"
 	msgraphsdk "github.com/microsoftgraph/msgraph-sdk-go"
 	"github.com/microsoftgraph/msgraph-sdk-go/models"
 	"github.com/microsoftgraph/msgraph-sdk-go/models/odataerrors"
@@ -16,10 +16,21 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
+type FolderStats struct {
+	Name         string
+	TotalItems   int32
+	LastItemDate *time.Time
+}
+
+type MailboxHealthStats struct {
+	TotalMessages int32
+	Folders       []FolderStats
+}
+
 // O365ClientInterface defines the interface for O365Client methods used by other packages.
 type O365ClientInterface interface {
 	GetMessages(ctx context.Context, mailboxName, sourceFolderID string, state *RunState, messagesChan chan<- models.Messageable) error
-	GetMailboxStatistics(ctx context.Context, mailboxName string) (int, error)
+	GetMailboxHealthCheck(ctx context.Context, mailboxName string) (*MailboxHealthStats, error)
 	MoveMessage(ctx context.Context, mailboxName, messageID, destinationFolderID string) error
 	GetOrCreateFolderIDByName(ctx context.Context, mailboxName, folderName string) (string, error)
 }
@@ -148,33 +159,46 @@ func (c *O365Client) GetOrCreateFolderIDByName(ctx context.Context, mailboxName,
 	return folderID, nil
 }
 
-// GetMailboxStatistics fetches the total message count for a given mailbox's Inbox.
-func (c *O365Client) GetMailboxStatistics(ctx context.Context, mailboxName string) (int, error) {
-	headers := abstractions.NewRequestHeaders()
-	headers.Add("ConsistencyLevel", "eventual")
-
-	requestConfiguration := &users.ItemMailFoldersItemMessagesRequestBuilderGetRequestConfiguration{
-		Headers: headers,
-		QueryParameters: &users.ItemMailFoldersItemMessagesRequestBuilderGetQueryParameters{
-			Count: Ptr(true),
-		},
+func (c *O365Client) GetMailboxHealthCheck(ctx context.Context, mailboxName string) (*MailboxHealthStats, error) {
+	stats := &MailboxHealthStats{
+		Folders: make([]FolderStats, 0),
 	}
 
-	// We need to get the messages collection to get the count.
-	// The SDK does not have a separate `.Count()` method on the collection itself.
-	// The count is returned as part of the collection response.
-	// So we make a GET request for messages with a page size of 1 and the $count parameter.
-	requestConfiguration.QueryParameters.Top = Ptr(int32(1))
-	result, err := c.client.Users().ByUserId(mailboxName).MailFolders().ByMailFolderId("inbox").Messages().Get(ctx, requestConfiguration)
+	// 1. Get all mail folders
+	foldersResponse, err := c.client.Users().ByUserId(mailboxName).MailFolders().Get(ctx, nil)
 	if err != nil {
-		return 0, handleError(err)
+		return nil, handleError(err)
 	}
 
-	if result.GetOdataCount() == nil {
-		return 0, fmt.Errorf("odata.count not returned in response")
+	allFolders := foldersResponse.GetValue()
+	for _, folder := range allFolders {
+		folderStat := FolderStats{
+			Name:       *folder.GetDisplayName(),
+			TotalItems: *folder.GetTotalItemCount(),
+		}
+
+		// 2. If it's the Inbox, get the last message date
+		if strings.ToLower(*folder.GetDisplayName()) == "inbox" {
+			// Query for the most recent message
+			lastMessage, err := c.client.Users().ByUserId(mailboxName).MailFolders().ByMailFolderId(*folder.GetId()).Messages().Get(ctx, &users.ItemMailFoldersItemMessagesRequestBuilderGetRequestConfiguration{
+				QueryParameters: &users.ItemMailFoldersItemMessagesRequestBuilderGetQueryParameters{
+					Top:     Ptr(int32(1)),
+					Select:  []string{"receivedDateTime"},
+					Orderby: []string{"receivedDateTime desc"},
+				},
+			})
+			if err != nil {
+				log.WithField("folder", folderStat.Name).Warnf("Could not fetch last message date: %v", err)
+			} else if len(lastMessage.GetValue()) > 0 {
+				folderStat.LastItemDate = lastMessage.GetValue()[0].GetReceivedDateTime()
+			}
+		}
+
+		stats.Folders = append(stats.Folders, folderStat)
+		stats.TotalMessages += folderStat.TotalItems
 	}
 
-	return int(*result.GetOdataCount()), nil
+	return stats, nil
 }
 
 // MoveMessage moves a message to a specified destination folder.

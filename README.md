@@ -18,6 +18,7 @@ It is designed for high-performance, parallelized downloading and is robust and 
 *   **Secure Token Management**: Provides multiple, mutually exclusive options for securely supplying the access token.
 *   **Health Check Mode**: Provides a "health check" mode to verify connectivity and authentication with the O365 mailbox without performing a full download.
 *   **Structured Logging**: Uses `logrus` for structured and informative logging, with a configurable debug level.
+*   **Advanced PDF Conversion Control**: For users converting emails to PDF, the application provides a `-rod` flag. This flag allows passing launch arguments directly to the underlying `go-rod` headless browser instance. For example, to use a proxy, you could pass `-rod="--proxy-server=127.0.0.1:8080"`. This provides fine-grained control over the browser environment used for conversion.
 
 ## Workspace Directory Structure
 
