@@ -20,6 +20,24 @@ It is designed for high-performance, parallelized downloading and is robust and 
 *   **Structured Logging**: Uses `logrus` for structured and informative logging, with a configurable debug level.
 *   **Advanced PDF Conversion Control**: For users converting emails to PDF, the application provides a `-rod` flag. This flag allows passing launch arguments directly to the underlying `go-rod` headless browser instance. For example, to use a proxy, you could pass `-rod="--proxy-server=127.0.0.1:8080"`. This provides fine-grained control over the browser environment used for conversion.
 
+## System Requirements
+
+### Windows Long Path Support
+
+Due to the way email subjects and attachment names can create very long file paths, `o365mbx` requires that "Win32 long path" support is enabled on Windows systems. The application will check for this at startup and will exit with an error if it is not enabled.
+
+You can enable this feature using one of the following methods:
+
+**Using the Group Policy Editor (`gpedit.msc`):**
+1.  Navigate to: `Local Computer Policy` -> `Computer Configuration` -> `Administrative Templates` -> `System` -> `Filesystem`.
+2.  Find and enable the "Enable Win32 long paths" option.
+
+**Using the Registry Editor (`regedit.exe`):**
+1.  Navigate to: `HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\FileSystem`.
+2.  Set the value of `LongPathsEnabled` (a `DWORD` type) to `1`.
+
+A system restart may be required for the change to take effect.
+
 ## Workspace Directory Structure
 
 The application saves each email into a dedicated folder within the specified workspace. The folder is named after the message's unique ID. Here is an example of the directory structure for a single downloaded email:

@@ -23,6 +23,9 @@ import (
 var version = "dev"
 
 func main() {
+	// --- Pre-flight Checks ---
+	checkLongPathSupport()
+
 	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
 
 	// --- Flag Definition ---

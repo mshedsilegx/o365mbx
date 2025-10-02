@@ -21,7 +21,7 @@ import (
 	"o365mbx/o365client"
 )
 
-const maxPathLength = 240 // A safe limit for total path length to avoid filesystem errors.
+const maxPathLength = 512 // A safe limit for total path length to avoid filesystem errors.
 
 // isPathTooLong checks if a given path exceeds the maximum allowed length.
 func isPathTooLong(path string) bool {
