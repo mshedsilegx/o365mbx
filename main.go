@@ -14,6 +14,7 @@ import (
 	"regexp"
 	"strings"
 	"syscall"
+	"text/tabwriter"
 	"time"
 
 	log "github.com/sirupsen/logrus"
@@ -144,12 +145,13 @@ func main() {
 	}
 
 	// --- Dependency Injection ---
+	logger := log.WithFields(log.Fields{}) // Create a base logger
 	o365Client, err := o365client.NewO365Client(accessToken, time.Duration(cfg.HTTPClientTimeoutSeconds)*time.Second, cfg.MaxRetries, cfg.InitialBackoffSeconds, cfg.APICallsPerSecond, cfg.APIBurst, rng)
 	if err != nil {
 		log.Fatalf("Error creating O365 client: %v", err)
 	}
-	emailProcessor := emailprocessor.NewEmailProcessor()
-	fileHandler := filehandler.NewFileHandler(cfg.WorkspacePath, o365Client, emailProcessor, cfg.LargeAttachmentThresholdMB, cfg.ChunkSizeMB, cfg.BandwidthLimitMBs)
+	emailProcessor := emailprocessor.NewEmailProcessor(logger)
+	fileHandler := filehandler.NewFileHandler(cfg.WorkspacePath, o365Client, emailProcessor, cfg.LargeAttachmentThresholdMB, cfg.ChunkSizeMB, cfg.BandwidthLimitMBs, logger)
 
 	// --- Health Check or Main Engine Execution ---
 	if *healthCheck {
@@ -229,14 +231,27 @@ func runHealthCheckMode(ctx context.Context, client o365client.O365ClientInterfa
 	fmt.Printf("Mailbox: %s\n", mailboxName)
 	fmt.Println("------------------------------")
 	fmt.Printf("Total Messages: %d\n", stats.TotalMessages)
+	fmt.Printf("Total Mailbox Size: %.2f MB\n", float64(stats.TotalMailboxSize)/1024/1024)
 	fmt.Println("------------------------------")
 	fmt.Println("\n--- Folder Statistics ---")
+
+	w := tabwriter.NewWriter(os.Stdout, 0, 0, 3, ' ', tabwriter.AlignRight)
+	if _, err := fmt.Fprintln(w, "Folder\tItems\tSize (KB)\t"); err != nil {
+		log.Warnf("Error writing to tabwriter: %v", err)
+	}
+	if _, err := fmt.Fprintln(w, "-------\t-----\t---------\t"); err != nil {
+		log.Warnf("Error writing to tabwriter: %v", err)
+	}
+
 	for _, folder := range stats.Folders {
-		fmt.Printf("  Folder: %s\n", folder.Name)
-		fmt.Printf("    - Items: %d\n", folder.TotalItems)
-		if folder.LastItemDate != nil {
-			fmt.Printf("    - Last Message: %s\n", folder.LastItemDate.Format(time.RFC1123))
+		folderSizeKB := float64(folder.Size) / 1024
+		if _, err := fmt.Fprintf(w, "%s\t%d\t%.2f\t\n", folder.Name, folder.TotalItems, folderSizeKB); err != nil {
+			log.Warnf("Error writing to tabwriter: %v", err)
 		}
+	}
+
+	if err := w.Flush(); err != nil {
+		log.Warnf("Error flushing tabwriter: %v", err)
 	}
 	fmt.Println("-------------------------")
 }

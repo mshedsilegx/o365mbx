@@ -2,9 +2,11 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"github.com/microsoftgraph/msgraph-sdk-go/models"
 	"io"
+	"o365mbx/apperrors"
 	"o365mbx/emailprocessor"
 	"o365mbx/filehandler"
 	"o365mbx/o365client"
@@ -19,11 +21,10 @@ import (
 )
 
 type AttachmentJob struct {
-	Attachment  models.Attachmentable
-	MessageID   string
-	AccessToken string
-	MsgPath     string
-	Sequence    int
+	Attachment models.Attachmentable
+	MessageID  string
+	MsgPath    string
+	Sequence   int
 }
 
 type RunStats struct {
@@ -83,6 +84,22 @@ func RunEngine(ctx context.Context, cfg *Config, o365Client o365client.O365Clien
 }
 
 func runDownloadMode(ctx context.Context, cfg *Config, o365Client o365client.O365ClientInterface, emailProcessor emailprocessor.EmailProcessorInterface, fileHandler filehandler.FileHandlerInterface, accessToken string, stats *RunStats) {
+	var messageStates sync.Map
+
+	defer func() {
+		// Cleanup check for any unprocessed message states
+		messageStates.Range(func(key, value interface{}) bool {
+			messageID := key.(string)
+			state := value.(*DownloadState)
+			log.WithFields(log.Fields{
+				"messageID":            messageID,
+				"expectedAttachments":  state.ExpectedAttachments,
+				"completedAttachments": state.CompletedAttachments,
+			}).Warn("Shutdown with unprocessed message state, attachments may be incomplete.")
+			return true // continue iterating
+		})
+	}()
+
 	var state *o365client.RunState
 	var err error
 	if cfg.ProcessingMode == "incremental" {
@@ -100,8 +117,6 @@ func runDownloadMode(ctx context.Context, cfg *Config, o365Client o365client.O36
 		state = &o365client.RunState{}
 	}
 
-	messageStates := make(map[string]*DownloadState)
-	var statesMutex sync.Mutex
 	messagesChan := make(chan models.Messageable, cfg.MaxParallelDownloads*2)
 	attachmentsChan := make(chan AttachmentJob, cfg.MaxParallelDownloads*4)
 	resultsChan := make(chan ProcessingResult, cfg.MaxParallelDownloads*4)
@@ -129,6 +144,9 @@ func runDownloadMode(ctx context.Context, cfg *Config, o365Client o365client.O36
 		defer producerWg.Done()
 		err := o365Client.GetMessages(ctx, cfg.MailboxName, sourceFolderID, state, messagesChan)
 		if err != nil {
+			if errors.Is(err, apperrors.ErrMissingDeltaLink) {
+				log.Fatalf("Critical error during incremental sync: %v. This indicates a problem with the API or the local state. Please run a full sync to resolve.", err)
+			}
 			log.Fatalf("O365 API error fetching messages: %v", err)
 		}
 	}()
@@ -156,43 +174,59 @@ func runDownloadMode(ctx context.Context, cfg *Config, o365Client o365client.O36
 				msgPath, saveErr := fileHandler.SaveMessage(msg, processedBody, effectiveConvertBody)
 				if saveErr != nil {
 					atomic.AddUint32(&stats.NonFatalErrors, 1)
-					if processingErr == nil {
-						processingErr = saveErr
+					finalErr := saveErr
+					if processingErr != nil {
+						finalErr = fmt.Errorf("body processing error: %w; and save error: %w", processingErr, saveErr)
 					}
-					log.WithFields(log.Fields{"messageID": *msg.GetId(), "error": processingErr}).Errorf("Error saving email message.")
+					log.WithFields(log.Fields{"messageID": *msg.GetId(), "error": finalErr}).Errorf("Error saving email message.")
 					if cfg.ProcessingMode == "route" {
-						resultsChan <- ProcessingResult{MessageID: *msg.GetId(), Err: processingErr, IsInitialization: true, TotalTasks: 1 + len(msg.GetAttachments())}
+						resultsChan <- ProcessingResult{MessageID: *msg.GetId(), Err: finalErr, IsInitialization: true, TotalTasks: 1}
 					}
 					<-semaphore
 					continue
 				}
 
-				if cfg.ProcessingMode == "route" {
-					totalTasks := 1 + len(msg.GetAttachments())
-					resultsChan <- ProcessingResult{
-						MessageID:        *msg.GetId(),
-						Err:              processingErr,
-						IsInitialization: true,
-						TotalTasks:       totalTasks,
-					}
-				}
-
+				// --- Attachment Handling (Two-Phase) ---
 				if *msg.GetHasAttachments() {
-					log.WithFields(log.Fields{"count": len(msg.GetAttachments()), "messageID": *msg.GetId()}).Infof("Found attachments.")
-					statesMutex.Lock()
-					messageStates[*msg.GetId()] = &DownloadState{
-						ExpectedAttachments: len(msg.GetAttachments()),
-						Attachments:         make([]filehandler.AttachmentMetadata, 0, len(msg.GetAttachments())),
-					}
-					statesMutex.Unlock()
-					for i, att := range msg.GetAttachments() {
-						attachmentsChan <- AttachmentJob{
-							Attachment:  att,
-							MessageID:   *msg.GetId(),
-							AccessToken: accessToken,
-							MsgPath:     msgPath,
-							Sequence:    i + 1,
+					attachments, err := o365Client.GetMessageAttachments(ctx, cfg.MailboxName, *msg.GetId())
+					if err != nil {
+						atomic.AddUint32(&stats.NonFatalErrors, 1)
+						log.WithFields(log.Fields{"messageID": *msg.GetId(), "error": err}).Error("Failed to fetch attachments for message.")
+						if cfg.ProcessingMode == "route" {
+							resultsChan <- ProcessingResult{MessageID: *msg.GetId(), Err: err, IsInitialization: true, TotalTasks: 1}
 						}
+						<-semaphore
+						continue
+					}
+
+					if len(attachments) > 0 {
+						log.WithFields(log.Fields{"count": len(attachments), "messageID": *msg.GetId()}).Infof("Found attachments.")
+						messageStates.Store(*msg.GetId(), &DownloadState{
+							ExpectedAttachments: len(attachments),
+							Attachments:         make([]filehandler.AttachmentMetadata, 0, len(attachments)),
+						})
+
+						if cfg.ProcessingMode == "route" {
+							totalTasks := 1 + len(attachments)
+							resultsChan <- ProcessingResult{MessageID: *msg.GetId(), Err: processingErr, IsInitialization: true, TotalTasks: totalTasks}
+						}
+
+						for i, att := range attachments {
+							attachmentsChan <- AttachmentJob{
+								Attachment: att,
+								MessageID:  *msg.GetId(),
+								MsgPath:    msgPath,
+								Sequence:   i + 1,
+							}
+						}
+					} else { // hasAttachments was true, but API returned none.
+						if cfg.ProcessingMode == "route" {
+							resultsChan <- ProcessingResult{MessageID: *msg.GetId(), Err: processingErr, IsInitialization: true, TotalTasks: 1}
+						}
+					}
+				} else { // No attachments.
+					if cfg.ProcessingMode == "route" {
+						resultsChan <- ProcessingResult{MessageID: *msg.GetId(), Err: processingErr, IsInitialization: true, TotalTasks: 1}
 					}
 				}
 
@@ -234,9 +268,8 @@ func runDownloadMode(ctx context.Context, cfg *Config, o365Client o365client.O36
 				}
 
 				// Always update state to prevent memory leaks, even on failure.
-				statesMutex.Lock()
-				state, ok := messageStates[job.MessageID]
-				if ok {
+				if rawState, ok := messageStates.Load(job.MessageID); ok {
+					state := rawState.(*DownloadState)
 					state.Mu.Lock()
 					state.CompletedAttachments++
 					if err == nil { // Only append metadata on success
@@ -254,10 +287,9 @@ func runDownloadMode(ctx context.Context, cfg *Config, o365Client o365client.O36
 							err = metaErr // The metadata error takes precedence for the final report.
 						}
 						// Clean up state for the message
-						delete(messageStates, job.MessageID)
+						messageStates.Delete(job.MessageID)
 					}
 				}
-				statesMutex.Unlock()
 
 				if cfg.ProcessingMode == "route" {
 					resultsChan <- ProcessingResult{MessageID: job.MessageID, Err: err}

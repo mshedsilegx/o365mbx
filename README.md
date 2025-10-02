@@ -7,7 +7,7 @@ It is designed for high-performance, parallelized downloading and is robust and 
 ## Features
 
 *   **High-Performance Parallel Processing**: Utilizes a decoupled producer-consumer architecture to download multiple messages and attachments concurrently, maximizing throughput within configurable API limits.
-*   **Efficient API Usage**: Optimizes API calls by expanding attachments directly with messages, significantly reducing network requests.
+*   **Reliable Attachment Handling**: Uses a two-phase download strategy. It first fetches messages and then fetches attachments for each message individually. This approach improves reliability and reduces memory usage, preventing API timeouts when processing mailboxes with large numbers of attachments.
 *   **Email and Attachment Download**: Downloads emails and their attachments from a specified O365 mailbox.
 *   **HTML to Plain Text Conversion**: Cleans email bodies by converting HTML to plain text, preserving links and image alt text.
 *   **Incremental Downloads**: Performs incremental downloads by saving the timestamp of the last run, fetching only new emails since that time.
@@ -154,14 +154,11 @@ All configuration options can be controlled via command-line arguments. Any flag
 | `-convert-body`                 | Conversion mode for email bodies: `none`, `text`, or `pdf`.               | No       | `none`  |
 | `-chromium-path`                | Absolute path to the headless Chromium/Chrome binary (required for `pdf`).| No       |         |
 | **Performance & Limits**        |                                                                           |          |         |
-| `-parallel`                     | Maximum number of parallel workers.                                       | No       | `10`    |
-| `-timeout`                      | HTTP client timeout in seconds.                                           | No       | `120`   |
-| `-api-rate`                     | API calls per second for client-side rate limiting.                       | No       | `5.0`   |
+| `-parallel`                     | Maximum number of parallel workers.                                       | No       | `4`     |
+| `-timeout`                      | HTTP client timeout in seconds.                                           | No       | `60`    |
+| `-api-rate`                     | API calls per second for client-side rate limiting.                       | No       | `10`    |
 | `-api-burst`                    | API burst capacity for client-side rate limiting.                         | No       | `10`    |
 | `-bandwidth-limit-mbs`          | Bandwidth limit in MB/s for downloads (0 for disabled).                   | No       | `0.0`   |
-| **Attachments**                 |                                                                           |          |         |
-| `-large-attachment-threshold-mb`| Threshold in MB for an attachment to be considered "large".               | No       | `20`    |
-| `-chunk-size-mb`                | Chunk size in MB for large attachment downloads.                          | No       | `8`     |
 
 ## Configuration File
 
@@ -213,9 +210,6 @@ For a more permanent setup, you can use a JSON file (e.g., `config.json`) and pa
     *   `maxParallelDownloads`: (Integer) The maximum number of concurrent workers.
     *   `apiCallsPerSecond`: (Float) The number of API calls allowed per second.
     *   `apiBurst`: (Integer) The burst capacity for the API rate limiter.
-*   **Attachments**:
-    *   `largeAttachmentThresholdMB`: (Integer) Attachments larger than this size (in MB) will be downloaded in chunks.
-    *   `chunkSizeMB`: (Integer) The size (in MB) of each chunk for large attachment downloads.
     *   `bandwidthLimitMBs`: (Float) The download speed limit in megabytes per second. `0` means disabled.
 *   **State**:
     *   `stateSaveInterval`: (Integer) How often to save the state file during a run (number of messages).
