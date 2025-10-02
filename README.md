@@ -142,6 +142,7 @@ All configuration options can be controlled via command-line arguments. Any flag
 | `-config`                       | Path to a JSON configuration file.                                        | No       |         |
 | `-debug`                        | Enable debug logging.                                                     | No       | `false` |
 | `-healthcheck`                  | Perform a health check and exit.                                          | No       | `false` |
+| `-message-details <folder>`     | When used with `-healthcheck`, displays message details for the specified folder. | No       |         |
 | `-version`                      | Display the application version and exit.                                 | No       | `false` |
 | **Processing & State**          |                                                                           |          |         |
 | `-processing-mode`              | Processing mode: `full`, `incremental`, or `route`.                       | No       | `full`  |
@@ -322,6 +323,71 @@ This example downloads all emails and converts their bodies from HTML to plain t
     -workspace "/path/to/your/output" \
     -token-file "/path/to/token.txt" \
     -convert-body text
+```
+
+### 9. Health Check Examples
+
+The `-healthcheck` flag provides powerful, read-only tools to inspect the mailbox without downloading any items.
+
+#### Basic Health Check
+
+This example runs a general health check on the mailbox, showing overall stats and a list of all folders, sorted by name.
+
+```shell
+./o365mbx \
+    -mailbox "user@example.com" \
+    -token-env \
+    -healthcheck
+```
+
+**Example Output:**
+
+```text
+--- Mailbox Health Check ---
+Mailbox: user@example.com
+------------------------------
+Total Messages: 1573
+Total Folders: 14
+Total Mailbox Size: 250.75 MB
+------------------------------
+
+--- Folder Statistics ---
+Folder                 Items   Size (KB)
+-------                -----   ---------
+Archive                50      102400.00
+Conversation History   2       50.20
+Deleted Items          10      5120.00
+Drafts                 1       10.50
+Inbox                  25      81920.00
+Junk Email             5       1024.00
+Outbox                 0       0.00
+... (and so on)
+-------------------------
+```
+
+#### Message Details Health Check
+
+This example extends the health check to show detailed information for all messages within a specific folder, such as the `Inbox`.
+
+```shell
+./o365mbx \
+    -mailbox "user@example.com" \
+    -token-env \
+    -healthcheck \
+    -message-details "Inbox"
+```
+
+**Example Output:**
+
+```text
+--- Message Details for Folder: Inbox ---
+From                  To                      Date                Subject                                                                 Attachments  Total Size (KB)
+----                  --                      ----                -------                                                                 -----------  ----------------
+sender@corp.com       user@example.com        2024-08-01 10:30    Q3 Financial Report and Project Updates                                 2            1205.63
+another@sender.org    user@example.com;...    2024-08-01 09:15    Important: Action Required for your account                             0            5.12
+marketing@company.com user@example.com        2024-07-31 16:00    Weekly Newsletter - Check out our new features and updates for this week! 0            15.30
+... (and so on)
+-------------------------------------------------
 ```
 
 ## License

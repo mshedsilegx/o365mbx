@@ -37,6 +37,7 @@ func main() {
 	workspacePath := flag.String("workspace", "", "Unique folder to store all artifacts")
 	displayVersion := flag.Bool("version", false, "Display application version")
 	healthCheck := flag.Bool("healthcheck", false, "Perform a health check on the mailbox and exit")
+	messageDetailsFolder := flag.String("message-details", "", "When used with -healthcheck, displays message details for the specified folder.")
 	debug := flag.Bool("debug", false, "Enable debug logging")
 	processingMode := flag.String("processing-mode", "full", "Processing mode: 'full', 'incremental', or 'route'.")
 	inboxFolder := flag.String("inbox-folder", "Inbox", "The source folder from which to process messages.")
@@ -155,7 +156,11 @@ func main() {
 
 	// --- Health Check or Main Engine Execution ---
 	if *healthCheck {
-		runHealthCheckMode(ctx, o365Client, cfg.MailboxName)
+		if *messageDetailsFolder != "" {
+			runMessageDetailsMode(ctx, o365Client, cfg.MailboxName, *messageDetailsFolder)
+		} else {
+			runHealthCheckMode(ctx, o365Client, cfg.MailboxName)
+		}
 		os.Exit(0)
 	}
 
@@ -231,6 +236,7 @@ func runHealthCheckMode(ctx context.Context, client o365client.O365ClientInterfa
 	fmt.Printf("Mailbox: %s\n", mailboxName)
 	fmt.Println("------------------------------")
 	fmt.Printf("Total Messages: %d\n", stats.TotalMessages)
+	fmt.Printf("Total Folders: %d\n", len(stats.Folders))
 	fmt.Printf("Total Mailbox Size: %.2f MB\n", float64(stats.TotalMailboxSize)/1024/1024)
 	fmt.Println("------------------------------")
 	fmt.Println("\n--- Folder Statistics ---")
@@ -254,4 +260,52 @@ func runHealthCheckMode(ctx context.Context, client o365client.O365ClientInterfa
 		log.Warnf("Error flushing tabwriter: %v", err)
 	}
 	fmt.Println("-------------------------")
+}
+
+func runMessageDetailsMode(ctx context.Context, client o365client.O365ClientInterface, mailboxName, folderName string) {
+	log.WithFields(log.Fields{
+		"mailbox": mailboxName,
+		"folder":  folderName,
+	}).Info("Fetching message details for folder...")
+
+	// This function will be implemented in the o365client package
+	messages, err := client.GetMessageDetailsForFolder(ctx, mailboxName, folderName)
+	if err != nil {
+		log.Fatalf("Failed to get message details: %v", err)
+	}
+
+	fmt.Printf("\n--- Message Details for Folder: %s ---\n", folderName)
+	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	if _, err := fmt.Fprintln(w, "From\tTo\tDate\tSubject\tAttachments\tTotal Size (KB)\t"); err != nil {
+		log.Warnf("Error writing to tabwriter: %v", err)
+	}
+	if _, err := fmt.Fprintln(w, "----\t--\t----\t-------\t-----------\t----------------\t"); err != nil {
+		log.Warnf("Error writing to tabwriter: %v", err)
+	}
+
+	for _, msg := range messages {
+		from := msg.From
+		to := msg.To
+		subject := msg.Subject
+		if len(subject) > 75 {
+			subject = subject[:72] + "..."
+		}
+		totalSizeKB := float64(msg.AttachmentsTotalSize) / 1024
+
+		if _, err := fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%d\t%.2f\t\n",
+			from,
+			to,
+			msg.Date.Format("2006-01-02 15:04"),
+			subject,
+			msg.AttachmentCount,
+			totalSizeKB,
+		); err != nil {
+			log.Warnf("Error writing to tabwriter: %v", err)
+		}
+	}
+
+	if err := w.Flush(); err != nil {
+		log.Warnf("Error flushing tabwriter: %v", err)
+	}
+	fmt.Println("-------------------------------------------------")
 }
