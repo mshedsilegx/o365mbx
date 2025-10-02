@@ -156,7 +156,7 @@ All configuration options can be controlled via command-line arguments. Any flag
 | ------------------------------- | ------------------------------------------------------------------------- | -------- | ------- |
 | **Required**                    |                                                                           |          |         |
 | `-mailbox`                      | The email address of the mailbox to download. Can also be set in config.  | **Yes**  |         |
-| `-workspace`                    | The absolute path for storing artifacts. Can also be set in config.       | **Yes**  |         |
+| `-workspace`                    | The absolute path for storing artifacts. Required unless `-healthcheck` is used. | Conditional |         |
 | **Token (Choose one)**          | Source can be string, file or environment variable                        | **Yes**  |         |
 | `-token-string`                 | JWT token as a string.                                                    |          |         |
 | `-token-file`                   | Path to a file containing the JWT token.                                  |          |         |

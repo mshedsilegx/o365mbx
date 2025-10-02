@@ -133,7 +133,8 @@ func main() {
 	if !isValidEmail(cfg.MailboxName) {
 		log.Fatalf("Error: Invalid mailbox name format: %s", cfg.MailboxName)
 	}
-	if cfg.WorkspacePath == "" {
+	// Workspace is only required if we are not in health check mode.
+	if !*healthCheck && cfg.WorkspacePath == "" {
 		log.Fatal("Error: Workspace path is a required argument (set via -workspace or in config file).")
 	}
 	if cfg.ProcessingMode == "incremental" && cfg.StateFilePath == "" {
