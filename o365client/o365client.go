@@ -212,7 +212,7 @@ func (c *O365Client) GetAllFolders(ctx context.Context, mailboxName string) ([]m
 	allFolders := make([]models.MailFolderable, 0)
 	requestConfiguration := &users.ItemMailFoldersRequestBuilderGetRequestConfiguration{
 		QueryParameters: &users.ItemMailFoldersRequestBuilderGetQueryParameters{
-			Select: []string{"id", "displayName", "totalItemCount", "sizeInBytes"},
+			Select: []string{"id", "displayName", "totalItemCount"},
 		},
 	}
 	foldersResponse, err := c.client.Users().ByUserId(mailboxName).MailFolders().Get(ctx, requestConfiguration)
