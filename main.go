@@ -266,13 +266,14 @@ func runMessageDetailsMode(ctx context.Context, client o365client.O365ClientInte
 	log.WithFields(log.Fields{
 		"mailbox": mailboxName,
 		"folder":  folderName,
-	}).Info("Fetching message details for folder...")
+	}).Info("Streaming message details for folder...")
 
-	// This function will be implemented in the o365client package
-	messages, err := client.GetMessageDetailsForFolder(ctx, mailboxName, folderName)
-	if err != nil {
-		log.Fatalf("Failed to get message details: %v", err)
-	}
+	detailsChan := make(chan o365client.MessageDetail)
+	errChan := make(chan error, 1)
+
+	go func() {
+		errChan <- client.GetMessageDetailsForFolder(ctx, mailboxName, folderName, detailsChan)
+	}()
 
 	fmt.Printf("\n--- Message Details for Folder: %s ---\n", folderName)
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
@@ -283,7 +284,8 @@ func runMessageDetailsMode(ctx context.Context, client o365client.O365ClientInte
 		log.Warnf("Error writing to tabwriter: %v", err)
 	}
 
-	for _, msg := range messages {
+	// Loop will end when detailsChan is closed by the client
+	for msg := range detailsChan {
 		from := msg.From
 		to := msg.To
 		subject := msg.Subject
@@ -308,4 +310,9 @@ func runMessageDetailsMode(ctx context.Context, client o365client.O365ClientInte
 		log.Warnf("Error flushing tabwriter: %v", err)
 	}
 	fmt.Println("-------------------------------------------------")
+
+	// Check for errors from the goroutine
+	if err := <-errChan; err != nil {
+		log.Fatalf("Failed to get message details: %v", err)
+	}
 }

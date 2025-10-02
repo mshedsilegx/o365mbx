@@ -44,7 +44,7 @@ type O365ClientInterface interface {
 	GetMessages(ctx context.Context, mailboxName, sourceFolderID string, state *RunState, messagesChan chan<- models.Messageable) error
 	GetMessageAttachments(ctx context.Context, mailboxName, messageID string) ([]models.Attachmentable, error)
 	GetMailboxHealthCheck(ctx context.Context, mailboxName string) (*MailboxHealthStats, error)
-	GetMessageDetailsForFolder(ctx context.Context, mailboxName, folderName string) ([]MessageDetail, error)
+	GetMessageDetailsForFolder(ctx context.Context, mailboxName, folderName string, detailsChan chan<- MessageDetail) error
 	MoveMessage(ctx context.Context, mailboxName, messageID, destinationFolderID string) error
 	GetOrCreateFolderIDByName(ctx context.Context, mailboxName, folderName string) (string, error)
 }
@@ -299,32 +299,76 @@ func (c *O365Client) GetMailboxHealthCheck(ctx context.Context, mailboxName stri
 	return stats, nil
 }
 
-func (c *O365Client) GetMessageDetailsForFolder(ctx context.Context, mailboxName, folderName string) ([]MessageDetail, error) {
+func (c *O365Client) GetMessageDetailsForFolder(ctx context.Context, mailboxName, folderName string, detailsChan chan<- MessageDetail) error {
+	defer close(detailsChan)
+
 	folderID, err := c.GetOrCreateFolderIDByName(ctx, mailboxName, folderName)
 	if err != nil {
-		return nil, fmt.Errorf("could not find or create folder '%s': %w", folderName, err)
+		return fmt.Errorf("could not find or create folder '%s': %w", folderName, err)
 	}
 
-	allMessages := make([]models.Messageable, 0)
 	requestConfig := &users.ItemMailFoldersItemMessagesRequestBuilderGetRequestConfiguration{
 		QueryParameters: &users.ItemMailFoldersItemMessagesRequestBuilderGetQueryParameters{
 			Select: []string{
 				"from", "toRecipients", "receivedDateTime", "subject", "hasAttachments",
 			},
-			// Expand attachments to get a count and their sizes
 			Expand: []string{"attachments($select=size)"},
-			Top:    Ptr(int32(100)), // Use a larger page size
+			Top:    Ptr(int32(100)),
 		},
 	}
 
 	messagesResponse, err := c.client.Users().ByUserId(mailboxName).MailFolders().ByMailFolderId(folderID).Messages().Get(ctx, requestConfig)
 	if err != nil {
-		return nil, handleError(err)
+		return handleError(err)
 	}
 
 	for {
 		pageMessages := messagesResponse.GetValue()
-		allMessages = append(allMessages, pageMessages...)
+		for _, msg := range pageMessages {
+			var totalAttachmentSize int64
+			attachmentCount := 0
+			if msg.GetHasAttachments() != nil && *msg.GetHasAttachments() {
+				attachments := msg.GetAttachments()
+				attachmentCount = len(attachments)
+				for _, att := range attachments {
+					if size := att.GetSize(); size != nil {
+						totalAttachmentSize += int64(*size)
+					}
+				}
+			}
+
+			var toString string
+			if toRecipients := msg.GetToRecipients(); len(toRecipients) > 0 {
+				toEmails := make([]string, len(toRecipients))
+				for i, r := range toRecipients {
+					if r.GetEmailAddress() != nil && r.GetEmailAddress().GetAddress() != nil {
+						toEmails[i] = *r.GetEmailAddress().GetAddress()
+					}
+				}
+				toString = strings.Join(toEmails, ";")
+			}
+
+			var fromString string
+			if from := msg.GetFrom(); from != nil && from.GetEmailAddress() != nil && from.GetEmailAddress().GetAddress() != nil {
+				fromString = *from.GetEmailAddress().GetAddress()
+			}
+
+			detail := MessageDetail{
+				From:                 fromString,
+				To:                   toString,
+				Date:                 *msg.GetReceivedDateTime(),
+				Subject:              *msg.GetSubject(),
+				AttachmentCount:      attachmentCount,
+				AttachmentsTotalSize: totalAttachmentSize,
+			}
+
+			select {
+			case <-ctx.Done():
+				log.Warn("Context cancelled during message detail streaming.")
+				return ctx.Err()
+			case detailsChan <- detail:
+			}
+		}
 
 		nextLink := messagesResponse.GetOdataNextLink()
 		if nextLink == nil || *nextLink == "" {
@@ -335,51 +379,11 @@ func (c *O365Client) GetMessageDetailsForFolder(ctx context.Context, mailboxName
 		builder := users.NewItemMailFoldersItemMessagesRequestBuilder(*nextLink, c.client.GetAdapter())
 		messagesResponse, err = builder.Get(ctx, nil)
 		if err != nil {
-			return nil, handleError(err)
+			return handleError(err)
 		}
 	}
 
-	details := make([]MessageDetail, 0, len(allMessages))
-	for _, msg := range allMessages {
-		var totalAttachmentSize int64
-		attachmentCount := 0
-		if msg.GetHasAttachments() != nil && *msg.GetHasAttachments() {
-			attachments := msg.GetAttachments()
-			attachmentCount = len(attachments)
-			for _, att := range attachments {
-				if size := att.GetSize(); size != nil {
-					totalAttachmentSize += int64(*size)
-				}
-			}
-		}
-
-		var toString string
-		if toRecipients := msg.GetToRecipients(); len(toRecipients) > 0 {
-			toEmails := make([]string, len(toRecipients))
-			for i, r := range toRecipients {
-				if r.GetEmailAddress() != nil && r.GetEmailAddress().GetAddress() != nil {
-					toEmails[i] = *r.GetEmailAddress().GetAddress()
-				}
-			}
-			toString = strings.Join(toEmails, ";")
-		}
-
-		var fromString string
-		if from := msg.GetFrom(); from != nil && from.GetEmailAddress() != nil && from.GetEmailAddress().GetAddress() != nil {
-			fromString = *from.GetEmailAddress().GetAddress()
-		}
-
-		details = append(details, MessageDetail{
-			From:                 fromString,
-			To:                   toString,
-			Date:                 *msg.GetReceivedDateTime(),
-			Subject:              *msg.GetSubject(),
-			AttachmentCount:      attachmentCount,
-			AttachmentsTotalSize: totalAttachmentSize,
-		})
-	}
-
-	return details, nil
+	return nil
 }
 
 // MoveMessage moves a message to a specified destination folder.
