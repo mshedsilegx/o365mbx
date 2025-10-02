@@ -19,12 +19,14 @@ import (
 type FolderStats struct {
 	Name         string
 	TotalItems   int32
+	Size         int64
 	LastItemDate *time.Time
 }
 
 type MailboxHealthStats struct {
-	TotalMessages int32
-	Folders       []FolderStats
+	TotalMessages    int32
+	TotalMailboxSize int64
+	Folders          []FolderStats
 }
 
 // O365ClientInterface defines the interface for O365Client methods used by other packages.
@@ -164,17 +166,34 @@ func (c *O365Client) GetMailboxHealthCheck(ctx context.Context, mailboxName stri
 		Folders: make([]FolderStats, 0),
 	}
 
-	// 1. Get all mail folders
-	foldersResponse, err := c.client.Users().ByUserId(mailboxName).MailFolders().Get(ctx, nil)
+	// 1. Get all mail folders, explicitly requesting sizeInBytes
+	requestConfiguration := &users.ItemMailFoldersRequestBuilderGetRequestConfiguration{
+		QueryParameters: &users.ItemMailFoldersRequestBuilderGetQueryParameters{
+			Select: []string{"id", "displayName", "totalItemCount", "sizeInBytes"},
+		},
+	}
+	foldersResponse, err := c.client.Users().ByUserId(mailboxName).MailFolders().Get(ctx, requestConfiguration)
 	if err != nil {
 		return nil, handleError(err)
 	}
 
 	allFolders := foldersResponse.GetValue()
+	var totalMailboxSize int64
 	for _, folder := range allFolders {
+		var folderSize int64
+		// The 'sizeInBytes' property is not a first-class property in the Go model.
+		// We must retrieve it from the additional data bag.
+		additionalData := folder.GetAdditionalData()
+		if size, ok := additionalData["sizeInBytes"]; ok {
+			if sizeInt64, ok := size.(*int64); ok && sizeInt64 != nil {
+				folderSize = *sizeInt64
+			}
+		}
+
 		folderStat := FolderStats{
 			Name:       *folder.GetDisplayName(),
 			TotalItems: *folder.GetTotalItemCount(),
+			Size:       folderSize,
 		}
 
 		// 2. If it's the Inbox, get the last message date
@@ -196,7 +215,10 @@ func (c *O365Client) GetMailboxHealthCheck(ctx context.Context, mailboxName stri
 
 		stats.Folders = append(stats.Folders, folderStat)
 		stats.TotalMessages += folderStat.TotalItems
+		totalMailboxSize += folderSize
 	}
+
+	stats.TotalMailboxSize = totalMailboxSize
 
 	return stats, nil
 }
