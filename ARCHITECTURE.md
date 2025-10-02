@@ -38,13 +38,15 @@ The application employs a sophisticated producer-consumer pattern using Go's gor
 
 *   **Producer (`o365client.GetMessages`):** A single goroutine responsible for fetching messages from the O365 Graph API. It handles pagination and filters messages based on the last run timestamp for incremental processing. Fetched messages are sent to the `messagesChan`.
 
-*   **Processors (Multiple Goroutines):** A pool of goroutines (number controlled by `MaxParallelDownloads`) that read messages from `messagesChan`. Each processor cleans the email body using `emailprocessor`, saves the message and its metadata to the local file system via `filehandler`, and then, if the message has attachments, dispatches `AttachmentJob`s to the `attachmentsChan`.
+*   **Processors (Multiple Goroutines):** A pool of goroutines (number controlled by `MaxParallelDownloads`) that read messages from `messagesChan`. Each processor first saves the message body and metadata. Then, if the message `hasAttachments`, it makes a separate API call to fetch the list of attachments for that specific message. It then dispatches individual `AttachmentJob`s to the `attachmentsChan`. This two-phase approach (fetch message, then fetch attachments) improves reliability and reduces memory consumption.
 
-*   **Downloaders (Multiple Goroutines):** Another pool of goroutines (also controlled by `MaxParallelDownloads`) that consume `AttachmentJob`s from `attachmentsChan`. Each downloader is responsible for downloading a specific attachment using `filehandler`, handling large attachments via chunked downloads, and updating the message's attachment metadata.
+*   **Downloaders (Multiple Goroutines):** Another pool of goroutines that consume `AttachmentJob`s from `attachmentsChan`. Each downloader is responsible for saving the attachment content (which is fetched with the attachment list) to the file system and updating the message's metadata.
 
 *   **Aggregator (Single Goroutine, in "route" mode only):** A dedicated goroutine that receives `ProcessingResult`s from both processors and downloaders via `resultsChan`. It tracks the completion status of each message (ensuring both body and all attachments are processed). Once a message is fully processed, the aggregator moves the original message in O365 to either a "Processed" or "Error" folder based on the outcome.
 
 *   **Channels (`messagesChan`, `attachmentsChan`, `resultsChan`):** Act as buffered queues, facilitating safe and efficient communication between different stages of the pipeline.
+
+*   **`sync.Map` for State Management:** The engine uses a `sync.Map` to safely track the download state of each message being processed concurrently. This provides a scalable and efficient way to manage state without the bottleneck of a single global mutex.
 
 *   **`sync.WaitGroup`:** Used to synchronize the completion of all producer, processor, downloader, and aggregator goroutines, ensuring the application exits gracefully only after all tasks are done.
 
@@ -54,19 +56,19 @@ The application employs a sophisticated producer-consumer pattern using Go's gor
 
 The application is designed to be highly resilient against network issues, API limitations, and file system errors.
 
-*   **Custom Error Types:** The `apperrors` package defines `AuthError`, `APIError`, and `FileSystemError`. These custom types allow the application to distinguish between different error sources, enabling more specific logging, user feedback, and programmatic error handling (e.g., retrying only for transient API errors).
+*   **Custom Error Types:** The `apperrors` package defines custom error types like `APIError`, `FileSystemError`, and `ErrMissingDeltaLink`. These types allow the application to distinguish between different error sources, enabling more specific logging, user feedback, and programmatic error handling.
 
-*   **Retry Mechanism (`o365client.DoRequestWithRetry`):** All HTTP requests to the O365 Graph API are wrapped with a retry logic. This mechanism automatically retries failed requests (e.g., due to network glitches or server-side errors like HTTP 5xx) using an exponential backoff strategy with added jitter to prevent thundering herd problems. The number of retries and initial backoff duration are configurable.
+*   **Built-in Retry Mechanism:** The application leverages the Microsoft Graph SDK's built-in retry middleware. This automatically retries failed requests (e.g., due to network glitches or server-side errors like HTTP 5xx) using an exponential backoff strategy. The number of retries and backoff duration are configurable.
 
-*   **Client-Side Rate Limiting:** To prevent hitting O365 Graph API throttling limits, the `o365client` integrates a `golang.org/x/time/rate` limiter. This proactively paces API requests based on `APICallsPerSecond` and `APIBurst` configuration parameters, ensuring the application remains a good API citizen.
+*   **Client-Side Rate Limiting:** To prevent hitting O365 Graph API throttling limits, the `o365client` is configured with client-side rate limiters (`APICallsPerSecond`, `APIBurst`). This proactively paces API requests, ensuring the application remains a good API citizen.
 
-*   **Context Cancellation:** A `context.Context` is propagated throughout the application's goroutines. This allows for graceful shutdown when an interrupt signal (e.g., `Ctrl+C`) is received, ensuring that ongoing operations are cancelled cleanly and resources are released. It also prevents indefinite waits during network operations if the context is cancelled.
+*   **Context Cancellation:** A `context.Context` is propagated throughout the application's goroutines. This allows for graceful shutdown when an interrupt signal (e.g., `Ctrl+C`) is received, ensuring that ongoing operations are cancelled cleanly and resources are released.
 
-*   **Large Attachment Handling:** Attachments exceeding a configurable `LargeAttachmentThresholdMB` are downloaded in smaller `ChunkSizeMB` segments. This reduces memory consumption, prevents potential timeouts on large transfers, and improves reliability over unstable networks.
+*   **Reliable Incremental Sync:** The application has specific logic to ensure the correctness of incremental downloads. If the Graph API fails to provide a `deltaLink` at the end of a sync, the application treats this as a fatal error (`apperrors.ErrMissingDeltaLink`) and terminates. This prevents silent failures that would cause the next run to re-download all data.
 
-*   **Incremental Downloads:** The application supports incremental processing by saving its `RunState` (last processed message timestamp and ID) to a state file. On subsequent runs, it can load this state and only fetch messages received after the last successful run, significantly improving efficiency for recurring tasks.
+*   **Graceful Shutdown and State Logging:** Upon shutdown, the application logs any messages that were still in the processing pipeline. This provides visibility into incomplete work and prevents silent data loss.
 
-*   **Workspace Validation and Security:** The `filehandler` package includes robust validation for the `workspacePath`. It ensures the path is absolute, prevents the use of critical system directories, and checks that the workspace is a legitimate directory (not a symbolic link) to mitigate Time-of-Check-to-Time-of-Use (TOCTOU) vulnerabilities. Filenames are also sanitized to prevent path traversal attacks and invalid characters.
+*   **Workspace Validation and Security:** The `filehandler` package includes robust validation for the `workspacePath`. It ensures the path is absolute, prevents the use of critical system directories, and checks that the workspace is a legitimate directory (not a symbolic link). Filenames are sanitized to prevent path traversal attacks, and total path length is checked to avoid filesystem errors.
 
 *   **Bandwidth Limiting:** An optional `bandwidthLimiter` in `filehandler` allows users to cap the download speed of attachments, which can be useful in environments with limited network capacity.
 

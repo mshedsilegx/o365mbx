@@ -19,17 +19,20 @@ import (
 type FolderStats struct {
 	Name         string
 	TotalItems   int32
+	Size         int64
 	LastItemDate *time.Time
 }
 
 type MailboxHealthStats struct {
-	TotalMessages int32
-	Folders       []FolderStats
+	TotalMessages    int32
+	TotalMailboxSize int64
+	Folders          []FolderStats
 }
 
 // O365ClientInterface defines the interface for O365Client methods used by other packages.
 type O365ClientInterface interface {
 	GetMessages(ctx context.Context, mailboxName, sourceFolderID string, state *RunState, messagesChan chan<- models.Messageable) error
+	GetMessageAttachments(ctx context.Context, mailboxName, messageID string) ([]models.Attachmentable, error)
 	GetMailboxHealthCheck(ctx context.Context, mailboxName string) (*MailboxHealthStats, error)
 	MoveMessage(ctx context.Context, mailboxName, messageID, destinationFolderID string) error
 	GetOrCreateFolderIDByName(ctx context.Context, mailboxName, folderName string) (string, error)
@@ -64,18 +67,19 @@ func NewO365Client(accessToken string, timeout time.Duration, maxRetries int, in
 func (c *O365Client) GetMessages(ctx context.Context, mailboxName, sourceFolderID string, state *RunState, messagesChan chan<- models.Messageable) error {
 	defer close(messagesChan)
 
+	isIncrementalRun := state.DeltaLink != ""
+
 	var (
 		messagesResponse users.ItemMailFoldersItemMessagesDeltaGetResponseable
 		err              error
 	)
 
-	if state.DeltaLink == "" {
+	if !isIncrementalRun {
 		log.Info("No delta link found. Starting initial synchronization.")
-		// By default, the API returns the body in HTML format.
-		// We omit the 'Prefer: outlook.body-content-type' header to get the full HTML.
+		// We no longer expand attachments here to reduce memory usage.
+		// Attachments will be fetched on a per-message basis.
 		requestConfiguration := &users.ItemMailFoldersItemMessagesDeltaRequestBuilderGetRequestConfiguration{
 			QueryParameters: &users.ItemMailFoldersItemMessagesDeltaRequestBuilderGetQueryParameters{
-				Expand: []string{"attachments"},
 				Select: []string{"id", "subject", "receivedDateTime", "body", "hasAttachments", "from", "toRecipients", "ccRecipients"},
 			},
 		}
@@ -108,7 +112,11 @@ func (c *O365Client) GetMessages(ctx context.Context, mailboxName, sourceFolderI
 				log.WithField("deltaLink", *deltaLink).Info("Captured new delta link for next run.")
 				state.DeltaLink = *deltaLink
 			} else {
-				log.Warn("Expected a delta link on the final page, but found none.")
+				if isIncrementalRun {
+					log.Error("Critical error: A delta link was expected on the final page of an incremental sync, but was not provided by the API.")
+					return apperrors.ErrMissingDeltaLink
+				}
+				log.Warn("Expected a delta link on the final page, but found none. This is not critical for a full sync, but state for the next incremental run cannot be saved.")
 			}
 			break
 		}
@@ -123,6 +131,20 @@ func (c *O365Client) GetMessages(ctx context.Context, mailboxName, sourceFolderI
 
 	log.Info("Finished processing all message pages.")
 	return nil
+}
+
+// GetMessageAttachments fetches all attachments for a specific message.
+func (c *O365Client) GetMessageAttachments(ctx context.Context, mailboxName, messageID string) ([]models.Attachmentable, error) {
+	log.WithFields(log.Fields{"messageID": messageID}).Debug("Fetching attachments for message.")
+
+	response, err := c.client.Users().ByUserId(mailboxName).Messages().ByMessageId(messageID).Attachments().Get(ctx, nil)
+	if err != nil {
+		return nil, handleError(err)
+	}
+
+	attachments := response.GetValue()
+	log.WithFields(log.Fields{"messageID": messageID, "count": len(attachments)}).Info("Successfully fetched attachments.")
+	return attachments, nil
 }
 
 // GetOrCreateFolderIDByName gets the ID of a folder by name, creating it if it doesn't exist.
@@ -165,16 +187,33 @@ func (c *O365Client) GetMailboxHealthCheck(ctx context.Context, mailboxName stri
 	}
 
 	// 1. Get all mail folders
-	foldersResponse, err := c.client.Users().ByUserId(mailboxName).MailFolders().Get(ctx, nil)
+	requestConfiguration := &users.ItemMailFoldersRequestBuilderGetRequestConfiguration{
+		QueryParameters: &users.ItemMailFoldersRequestBuilderGetQueryParameters{
+			Select: []string{"id", "displayName", "totalItemCount"},
+		},
+	}
+	foldersResponse, err := c.client.Users().ByUserId(mailboxName).MailFolders().Get(ctx, requestConfiguration)
 	if err != nil {
 		return nil, handleError(err)
 	}
 
 	allFolders := foldersResponse.GetValue()
+	var totalMailboxSize int64
 	for _, folder := range allFolders {
+		var folderSize int64
+		// The 'sizeInBytes' property is not a first-class property in the Go model.
+		// We must retrieve it from the additional data bag.
+		additionalData := folder.GetAdditionalData()
+		if size, ok := additionalData["sizeInBytes"]; ok {
+			if sizeInt64, ok := size.(*int64); ok && sizeInt64 != nil {
+				folderSize = *sizeInt64
+			}
+		}
+
 		folderStat := FolderStats{
 			Name:       *folder.GetDisplayName(),
 			TotalItems: *folder.GetTotalItemCount(),
+			Size:       folderSize,
 		}
 
 		// 2. If it's the Inbox, get the last message date
@@ -196,7 +235,10 @@ func (c *O365Client) GetMailboxHealthCheck(ctx context.Context, mailboxName stri
 
 		stats.Folders = append(stats.Folders, folderStat)
 		stats.TotalMessages += folderStat.TotalItems
+		totalMailboxSize += folderSize
 	}
+
+	stats.TotalMailboxSize = totalMailboxSize
 
 	return stats, nil
 }

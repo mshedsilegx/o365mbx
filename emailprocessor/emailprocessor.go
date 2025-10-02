@@ -9,6 +9,7 @@ import (
 	"github.com/go-rod/rod"
 	"github.com/go-rod/rod/lib/launcher"
 	"github.com/go-rod/rod/lib/proto"
+	log "github.com/sirupsen/logrus"
 	"golang.org/x/net/html"
 )
 
@@ -25,10 +26,12 @@ type EmailProcessorInterface interface {
 	IsHTML(content string) bool
 }
 
-type EmailProcessor struct{}
+type EmailProcessor struct {
+	logger log.FieldLogger
+}
 
-func NewEmailProcessor() *EmailProcessor {
-	return &EmailProcessor{}
+func NewEmailProcessor(logger log.FieldLogger) *EmailProcessor {
+	return &EmailProcessor{logger: logger}
 }
 
 // ProcessBody converts the body of an email to the specified format.
@@ -66,9 +69,7 @@ func (ep *EmailProcessor) ConvertToPDF(htmlContent, chromiumPath string) ([]byte
 	}
 	defer func() {
 		if err := pdf.Close(); err != nil {
-			// Using a generic logger as we don't have access to logrus here
-			// In a real app, you might pass a logger in
-			fmt.Printf("Warning: failed to close PDF reader stream: %v\n", err)
+			ep.logger.Warnf("Failed to close PDF reader stream: %v", err)
 		}
 	}()
 

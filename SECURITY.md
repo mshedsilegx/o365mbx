@@ -28,3 +28,27 @@ We kindly ask that you do not disclose the vulnerability publicly until we have 
 Please do not report security vulnerabilities through public GitHub issues nor PR.
 
 Thank you for helping to keep our project secure.
+
+---
+
+## Application Security Measures
+
+In addition to our vulnerability reporting policy, the application itself is built with security as a core principle. The following are key security features and practices embedded in the application's design:
+
+### Secure Token Handling
+
+*   **Mutually Exclusive Token Sources:** The application enforces that exactly one token source (`-token-string`, `-token-file`, or `-token-env`) can be used at a time. This prevents ambiguity and reduces the risk of accidentally exposing a token from an unintended source.
+*   **Automatic Token File Removal:** The `-remove-token-file` flag provides a convenient way to ensure that the token file is automatically deleted from the disk after the application finishes its run, minimizing the exposure of credentials on the file system.
+
+### Filesystem and Path Safety
+
+*   **Workspace Validation:** Before any files are written, the application performs several critical checks on the provided workspace directory:
+    *   It ensures the path is absolute, preventing ambiguity.
+    *   It prohibits the use of critical system directories (e.g., `/`, `/etc`, `/root`) as a workspace to prevent accidental damage to the system.
+    *   It verifies that the workspace path is a directory and not a symbolic link. This is a crucial defense against Time-of-Check-to-Time-of-Use (TOCTOU) attacks, where a symlink could be manipulated to cause the application to write files to an unintended location.
+*   **Filename Sanitization:** All filenames from email attachments are rigorously sanitized before being saved to disk. This process removes characters that are invalid in file paths (e.g., `/`, `\`, `*`) and strips path traversal sequences (e.g., `..`) to prevent attackers from writing files outside of the intended workspace directory.
+*   **Path Length Enforcement:** The application checks the total length of the final path for any file it creates. This prevents errors on filesystems with path length limitations (such as Windows) and mitigates potential denial-of-service vectors.
+
+### Principle of Least Privilege
+
+*   **API Permissions:** The documentation strongly recommends adhering to the principle of least privilege when configuring API permissions in Azure. For download-only modes, `Mail.Read` is sufficient, while the more permissive `Mail.ReadWrite` is only required for `route` mode, which moves emails. This minimizes the potential impact if an access token were to be compromised.
