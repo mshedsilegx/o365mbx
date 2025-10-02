@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
+	"sort"
 	"strings"
 	"time"
 
@@ -29,11 +30,21 @@ type MailboxHealthStats struct {
 	Folders          []FolderStats
 }
 
+type MessageDetail struct {
+	From                 string
+	To                   string
+	Date                 time.Time
+	Subject              string
+	AttachmentCount      int
+	AttachmentsTotalSize int64
+}
+
 // O365ClientInterface defines the interface for O365Client methods used by other packages.
 type O365ClientInterface interface {
 	GetMessages(ctx context.Context, mailboxName, sourceFolderID string, state *RunState, messagesChan chan<- models.Messageable) error
 	GetMessageAttachments(ctx context.Context, mailboxName, messageID string) ([]models.Attachmentable, error)
 	GetMailboxHealthCheck(ctx context.Context, mailboxName string) (*MailboxHealthStats, error)
+	GetMessageDetailsForFolder(ctx context.Context, mailboxName, folderName string, detailsChan chan<- MessageDetail) error
 	MoveMessage(ctx context.Context, mailboxName, messageID, destinationFolderID string) error
 	GetOrCreateFolderIDByName(ctx context.Context, mailboxName, folderName string) (string, error)
 }
@@ -153,6 +164,7 @@ func (c *O365Client) GetOrCreateFolderIDByName(ctx context.Context, mailboxName,
 	requestConfiguration := &users.ItemMailFoldersRequestBuilderGetRequestConfiguration{
 		QueryParameters: &users.ItemMailFoldersRequestBuilderGetQueryParameters{
 			Filter: &filter,
+			Top:    Ptr(int32(1)), // We only need one result
 		},
 	}
 
@@ -165,6 +177,20 @@ func (c *O365Client) GetOrCreateFolderIDByName(ctx context.Context, mailboxName,
 		folderID := *folders.GetValue()[0].GetId()
 		log.WithField("folderName", folderName).Info("Found existing folder.")
 		return folderID, nil
+	}
+
+	// If folder is not found by exact match, try a case-insensitive search on client side
+	allFolders, err := c.GetAllFolders(ctx, mailboxName)
+	if err != nil {
+		return "", fmt.Errorf("could not get all folders for case-insensitive search: %w", err)
+	}
+
+	for _, folder := range allFolders {
+		if strings.EqualFold(*folder.GetDisplayName(), folderName) {
+			folderID := *folder.GetId()
+			log.WithField("folderName", folderName).Info("Found existing folder (case-insensitive).")
+			return folderID, nil
+		}
 	}
 
 	log.WithField("folderName", folderName).Info("Folder not found, creating it.")
@@ -181,12 +207,9 @@ func (c *O365Client) GetOrCreateFolderIDByName(ctx context.Context, mailboxName,
 	return folderID, nil
 }
 
-func (c *O365Client) GetMailboxHealthCheck(ctx context.Context, mailboxName string) (*MailboxHealthStats, error) {
-	stats := &MailboxHealthStats{
-		Folders: make([]FolderStats, 0),
-	}
-
-	// 1. Get all mail folders
+// GetAllFolders retrieves all mail folders for a mailbox, handling pagination.
+func (c *O365Client) GetAllFolders(ctx context.Context, mailboxName string) ([]models.MailFolderable, error) {
+	allFolders := make([]models.MailFolderable, 0)
 	requestConfiguration := &users.ItemMailFoldersRequestBuilderGetRequestConfiguration{
 		QueryParameters: &users.ItemMailFoldersRequestBuilderGetQueryParameters{
 			Select: []string{"id", "displayName", "totalItemCount"},
@@ -197,7 +220,40 @@ func (c *O365Client) GetMailboxHealthCheck(ctx context.Context, mailboxName stri
 		return nil, handleError(err)
 	}
 
-	allFolders := foldersResponse.GetValue()
+	for {
+		pageFolders := foldersResponse.GetValue()
+		allFolders = append(allFolders, pageFolders...)
+
+		nextLink := foldersResponse.GetOdataNextLink()
+		if nextLink == nil || *nextLink == "" {
+			break
+		}
+
+		log.Debug("Fetching next page of mail folders.")
+		builder := users.NewItemMailFoldersRequestBuilder(*nextLink, c.client.GetAdapter())
+		foldersResponse, err = builder.Get(ctx, nil)
+		if err != nil {
+			return nil, handleError(err)
+		}
+	}
+	return allFolders, nil
+}
+
+func (c *O365Client) GetMailboxHealthCheck(ctx context.Context, mailboxName string) (*MailboxHealthStats, error) {
+	stats := &MailboxHealthStats{
+		Folders: make([]FolderStats, 0),
+	}
+
+	allFolders, err := c.GetAllFolders(ctx, mailboxName)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get all folders: %w", err)
+	}
+
+	// Sort folders by name
+	sort.Slice(allFolders, func(i, j int) bool {
+		return strings.ToLower(*allFolders[i].GetDisplayName()) < strings.ToLower(*allFolders[j].GetDisplayName())
+	})
+
 	var totalMailboxSize int64
 	for _, folder := range allFolders {
 		var folderSize int64
@@ -241,6 +297,93 @@ func (c *O365Client) GetMailboxHealthCheck(ctx context.Context, mailboxName stri
 	stats.TotalMailboxSize = totalMailboxSize
 
 	return stats, nil
+}
+
+func (c *O365Client) GetMessageDetailsForFolder(ctx context.Context, mailboxName, folderName string, detailsChan chan<- MessageDetail) error {
+	defer close(detailsChan)
+
+	folderID, err := c.GetOrCreateFolderIDByName(ctx, mailboxName, folderName)
+	if err != nil {
+		return fmt.Errorf("could not find or create folder '%s': %w", folderName, err)
+	}
+
+	requestConfig := &users.ItemMailFoldersItemMessagesRequestBuilderGetRequestConfiguration{
+		QueryParameters: &users.ItemMailFoldersItemMessagesRequestBuilderGetQueryParameters{
+			Select: []string{
+				"from", "toRecipients", "receivedDateTime", "subject", "hasAttachments",
+			},
+			Expand: []string{"attachments($select=size)"},
+			Top:    Ptr(int32(100)),
+		},
+	}
+
+	messagesResponse, err := c.client.Users().ByUserId(mailboxName).MailFolders().ByMailFolderId(folderID).Messages().Get(ctx, requestConfig)
+	if err != nil {
+		return handleError(err)
+	}
+
+	for {
+		pageMessages := messagesResponse.GetValue()
+		for _, msg := range pageMessages {
+			var totalAttachmentSize int64
+			attachmentCount := 0
+			if msg.GetHasAttachments() != nil && *msg.GetHasAttachments() {
+				attachments := msg.GetAttachments()
+				attachmentCount = len(attachments)
+				for _, att := range attachments {
+					if size := att.GetSize(); size != nil {
+						totalAttachmentSize += int64(*size)
+					}
+				}
+			}
+
+			var toString string
+			if toRecipients := msg.GetToRecipients(); len(toRecipients) > 0 {
+				toEmails := make([]string, len(toRecipients))
+				for i, r := range toRecipients {
+					if r.GetEmailAddress() != nil && r.GetEmailAddress().GetAddress() != nil {
+						toEmails[i] = *r.GetEmailAddress().GetAddress()
+					}
+				}
+				toString = strings.Join(toEmails, ";")
+			}
+
+			var fromString string
+			if from := msg.GetFrom(); from != nil && from.GetEmailAddress() != nil && from.GetEmailAddress().GetAddress() != nil {
+				fromString = *from.GetEmailAddress().GetAddress()
+			}
+
+			detail := MessageDetail{
+				From:                 fromString,
+				To:                   toString,
+				Date:                 *msg.GetReceivedDateTime(),
+				Subject:              *msg.GetSubject(),
+				AttachmentCount:      attachmentCount,
+				AttachmentsTotalSize: totalAttachmentSize,
+			}
+
+			select {
+			case <-ctx.Done():
+				log.Warn("Context cancelled during message detail streaming.")
+				return ctx.Err()
+			case detailsChan <- detail:
+			}
+		}
+
+		nextLink := messagesResponse.GetOdataNextLink()
+		if nextLink == nil || *nextLink == "" {
+			break
+		}
+
+		log.Debug("Fetching next page of messages for details.")
+		builder := users.NewItemMailFoldersItemMessagesRequestBuilder(*nextLink, c.client.GetAdapter())
+		messagesResponse, err = builder.Get(ctx, nil)
+		if err != nil {
+			return handleError(err)
+		}
+	}
+
+	return nil
 }
 
 // MoveMessage moves a message to a specified destination folder.

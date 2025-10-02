@@ -9,12 +9,12 @@ import (
 	"o365mbx/engine"
 	"o365mbx/filehandler"
 	"o365mbx/o365client"
+	"o365mbx/presenter"
 	"os"
 	"os/signal"
 	"regexp"
 	"strings"
 	"syscall"
-	"text/tabwriter"
 	"time"
 
 	log "github.com/sirupsen/logrus"
@@ -23,6 +23,9 @@ import (
 var version = "dev"
 
 func main() {
+	// --- Pre-flight Checks ---
+	checkLongPathSupport()
+
 	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
 
 	// --- Flag Definition ---
@@ -37,6 +40,7 @@ func main() {
 	workspacePath := flag.String("workspace", "", "Unique folder to store all artifacts")
 	displayVersion := flag.Bool("version", false, "Display application version")
 	healthCheck := flag.Bool("healthcheck", false, "Perform a health check on the mailbox and exit")
+	messageDetailsFolder := flag.String("message-details", "", "When used with -healthcheck, displays message details for the specified folder.")
 	debug := flag.Bool("debug", false, "Enable debug logging")
 	processingMode := flag.String("processing-mode", "full", "Processing mode: 'full', 'incremental', or 'route'.")
 	inboxFolder := flag.String("inbox-folder", "Inbox", "The source folder from which to process messages.")
@@ -129,7 +133,8 @@ func main() {
 	if !isValidEmail(cfg.MailboxName) {
 		log.Fatalf("Error: Invalid mailbox name format: %s", cfg.MailboxName)
 	}
-	if cfg.WorkspacePath == "" {
+	// Workspace is only required if we are not in health check mode.
+	if !*healthCheck && cfg.WorkspacePath == "" {
 		log.Fatal("Error: Workspace path is a required argument (set via -workspace or in config file).")
 	}
 	if cfg.ProcessingMode == "incremental" && cfg.StateFilePath == "" {
@@ -155,7 +160,11 @@ func main() {
 
 	// --- Health Check or Main Engine Execution ---
 	if *healthCheck {
-		runHealthCheckMode(ctx, o365Client, cfg.MailboxName)
+		if *messageDetailsFolder != "" {
+			presenter.RunMessageDetailsMode(ctx, o365Client, cfg.MailboxName, *messageDetailsFolder)
+		} else {
+			presenter.RunHealthCheckMode(ctx, o365Client, cfg.MailboxName)
+		}
 		os.Exit(0)
 	}
 
@@ -219,39 +228,3 @@ func isValidEmail(email string) bool {
 	return emailRegex.MatchString(email)
 }
 
-func runHealthCheckMode(ctx context.Context, client o365client.O365ClientInterface, mailboxName string) {
-	log.WithField("mailbox", mailboxName).Info("Performing health check...")
-	stats, err := client.GetMailboxHealthCheck(ctx, mailboxName)
-	if err != nil {
-		log.Fatalf("O365 API error during health check: %v", err)
-	}
-
-	log.WithField("mailbox", mailboxName).Info("Health check successful.")
-	fmt.Println("\n--- Mailbox Health Check ---")
-	fmt.Printf("Mailbox: %s\n", mailboxName)
-	fmt.Println("------------------------------")
-	fmt.Printf("Total Messages: %d\n", stats.TotalMessages)
-	fmt.Printf("Total Mailbox Size: %.2f MB\n", float64(stats.TotalMailboxSize)/1024/1024)
-	fmt.Println("------------------------------")
-	fmt.Println("\n--- Folder Statistics ---")
-
-	w := tabwriter.NewWriter(os.Stdout, 0, 0, 3, ' ', tabwriter.AlignRight)
-	if _, err := fmt.Fprintln(w, "Folder\tItems\tSize (KB)\t"); err != nil {
-		log.Warnf("Error writing to tabwriter: %v", err)
-	}
-	if _, err := fmt.Fprintln(w, "-------\t-----\t---------\t"); err != nil {
-		log.Warnf("Error writing to tabwriter: %v", err)
-	}
-
-	for _, folder := range stats.Folders {
-		folderSizeKB := float64(folder.Size) / 1024
-		if _, err := fmt.Fprintf(w, "%s\t%d\t%.2f\t\n", folder.Name, folder.TotalItems, folderSizeKB); err != nil {
-			log.Warnf("Error writing to tabwriter: %v", err)
-		}
-	}
-
-	if err := w.Flush(); err != nil {
-		log.Warnf("Error flushing tabwriter: %v", err)
-	}
-	fmt.Println("-------------------------")
-}
