@@ -235,14 +235,22 @@ func runHealthCheckMode(ctx context.Context, client o365client.O365ClientInterfa
 	fmt.Println("\n--- Folder Statistics ---")
 
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 3, ' ', tabwriter.AlignRight)
-	fmt.Fprintln(w, "Folder\tItems\tSize (KB)\t")
-	fmt.Fprintln(w, "-------\t-----\t---------\t")
+	if _, err := fmt.Fprintln(w, "Folder\tItems\tSize (KB)\t"); err != nil {
+		log.Warnf("Error writing to tabwriter: %v", err)
+	}
+	if _, err := fmt.Fprintln(w, "-------\t-----\t---------\t"); err != nil {
+		log.Warnf("Error writing to tabwriter: %v", err)
+	}
 
 	for _, folder := range stats.Folders {
 		folderSizeKB := float64(folder.Size) / 1024
-		fmt.Fprintf(w, "%s\t%d\t%.2f\t\n", folder.Name, folder.TotalItems, folderSizeKB)
+		if _, err := fmt.Fprintf(w, "%s\t%d\t%.2f\t\n", folder.Name, folder.TotalItems, folderSizeKB); err != nil {
+			log.Warnf("Error writing to tabwriter: %v", err)
+		}
 	}
 
-	w.Flush()
+	if err := w.Flush(); err != nil {
+		log.Warnf("Error flushing tabwriter: %v", err)
+	}
 	fmt.Println("-------------------------")
 }
