@@ -22,6 +22,10 @@ It is designed for high-performance, parallelized downloading and is robust and 
 
 ## System Requirements
 
+### File Path Length
+
+The application now supports a maximum file path length of 512 characters. On systems where this limit might be an issue (e.g., older Windows versions without long path support), please see the requirements below.
+
 ### Windows Long Path Support
 
 Due to the way email subjects and attachment names can create very long file paths, `o365mbx` requires that "Win32 long path" support is enabled on Windows systems. The application will check for this at startup and will exit with an error if it is not enabled.
