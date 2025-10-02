@@ -145,12 +145,13 @@ func main() {
 	}
 
 	// --- Dependency Injection ---
+	logger := log.WithFields(log.Fields{}) // Create a base logger
 	o365Client, err := o365client.NewO365Client(accessToken, time.Duration(cfg.HTTPClientTimeoutSeconds)*time.Second, cfg.MaxRetries, cfg.InitialBackoffSeconds, cfg.APICallsPerSecond, cfg.APIBurst, rng)
 	if err != nil {
 		log.Fatalf("Error creating O365 client: %v", err)
 	}
-	emailProcessor := emailprocessor.NewEmailProcessor()
-	fileHandler := filehandler.NewFileHandler(cfg.WorkspacePath, o365Client, emailProcessor, cfg.LargeAttachmentThresholdMB, cfg.ChunkSizeMB, cfg.BandwidthLimitMBs)
+	emailProcessor := emailprocessor.NewEmailProcessor(logger)
+	fileHandler := filehandler.NewFileHandler(cfg.WorkspacePath, o365Client, emailProcessor, cfg.LargeAttachmentThresholdMB, cfg.ChunkSizeMB, cfg.BandwidthLimitMBs, logger)
 
 	// --- Health Check or Main Engine Execution ---
 	if *healthCheck {
