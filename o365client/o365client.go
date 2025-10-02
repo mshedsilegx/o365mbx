@@ -166,10 +166,10 @@ func (c *O365Client) GetMailboxHealthCheck(ctx context.Context, mailboxName stri
 		Folders: make([]FolderStats, 0),
 	}
 
-	// 1. Get all mail folders, explicitly requesting sizeInBytes
+	// 1. Get all mail folders
 	requestConfiguration := &users.ItemMailFoldersRequestBuilderGetRequestConfiguration{
 		QueryParameters: &users.ItemMailFoldersRequestBuilderGetQueryParameters{
-			Select: []string{"id", "displayName", "totalItemCount", "sizeInBytes"},
+			Select: []string{"id", "displayName", "totalItemCount"},
 		},
 	}
 	foldersResponse, err := c.client.Users().ByUserId(mailboxName).MailFolders().Get(ctx, requestConfiguration)
