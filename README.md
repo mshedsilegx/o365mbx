@@ -20,6 +20,8 @@ It is designed for high-performance, parallelized downloading and is robust and 
 *   **Structured Logging**: Uses `logrus` for structured and informative logging, with a configurable debug level.
 *   **Advanced PDF Conversion Control**: For users converting emails to PDF, the application provides a `-rod` flag. This flag allows passing launch arguments directly to the underlying `go-rod` headless browser instance. For example, to use a proxy, you could pass `-rod="--proxy-server=127.0.0.1:8080"`. This provides fine-grained control over the browser environment used for conversion.
 
+    > **Security Warning:** The `-rod` flag passes arguments directly to the underlying browser engine. Use this feature with caution and only with trusted arguments to avoid potential command injection vulnerabilities.
+
 ## System Requirements
 
 ### File Path Length

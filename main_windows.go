@@ -29,7 +29,11 @@ func checkLongPathSupport() {
 		log.Debugf("Could not open FileSystem registry key: %v. Unable to verify long path support.", err)
 		return
 	}
-	defer key.Close()
+	defer func() {
+		if err := key.Close(); err != nil {
+			log.Debugf("Error closing registry key: %v", err)
+		}
+	}()
 
 	val, _, err := key.GetIntegerValue("LongPathsEnabled")
 	// If the value doesn't exist, it's disabled by default.
