@@ -21,6 +21,13 @@ import (
 	"o365mbx/o365client"
 )
 
+const maxPathLength = 240 // A safe limit for total path length to avoid filesystem errors.
+
+// isPathTooLong checks if a given path exceeds the maximum allowed length.
+func isPathTooLong(path string) bool {
+	return len(path) > maxPathLength
+}
+
 // AttachmentMetadata holds metadata for a single attachment.
 type AttachmentMetadata struct {
 	Name        string `json:"attachment_name_in_message"`
@@ -74,12 +81,12 @@ type FileHandler struct {
 	mapMutex                 sync.Mutex
 }
 
-func NewFileHandler(workspacePath string, o365Client o365client.O365ClientInterface, emailProcessor emailprocessor.EmailProcessorInterface, largeAttachmentThresholdMB, chunkSizeMB int, bandwidthLimitMBs float64) *FileHandler {
+func NewFileHandler(workspacePath string, o365Client o365client.O365ClientInterface, emailProcessor emailprocessor.EmailProcessorInterface, largeAttachmentThresholdMB, chunkSizeMB int, bandwidthLimitMBs float64, logger log.FieldLogger) *FileHandler {
 	var limiter *rate.Limiter
 	if bandwidthLimitMBs > 0 {
 		limit := rate.Limit(bandwidthLimitMBs * 1024 * 1024)
 		limiter = rate.NewLimiter(limit, int(limit)) // Burst equal to the limit
-		log.WithField("limit", limit).Info("Bandwidth limiting enabled.")
+		logger.WithField("limit", limit).Info("Bandwidth limiting enabled.")
 	}
 
 	return &FileHandler{
@@ -152,6 +159,9 @@ func toRecipient(mRecipient models.Recipientable) Recipient {
 // SaveMessage creates the directory structure for a message and saves the metadata and body.
 func (fh *FileHandler) SaveMessage(message models.Messageable, bodyContent interface{}, convertBody string) (string, error) {
 	msgPath := filepath.Join(fh.workspacePath, *message.GetId())
+	if isPathTooLong(msgPath) {
+		return "", &apperrors.FileSystemError{Path: msgPath, Msg: "generated message path exceeds maximum length", Err: nil}
+	}
 	attachmentsPath := filepath.Join(msgPath, "attachments")
 	if err := os.MkdirAll(attachmentsPath, 0755); err != nil {
 		return "", &apperrors.FileSystemError{Path: attachmentsPath, Msg: "failed to create attachments directory", Err: err}
@@ -181,7 +191,11 @@ func (fh *FileHandler) SaveMessage(message models.Messageable, bodyContent inter
 	bodyFileName := "body" + bodyExt
 
 	// Save the body
-	if err := fh.saveEmailBody(filepath.Join(msgPath, bodyFileName), bodyContent); err != nil {
+	bodyFilePath := filepath.Join(msgPath, bodyFileName)
+	if isPathTooLong(bodyFilePath) {
+		return "", &apperrors.FileSystemError{Path: bodyFilePath, Msg: "generated body file path exceeds maximum length", Err: nil}
+	}
+	if err := fh.saveEmailBody(bodyFilePath, bodyContent); err != nil {
 		return "", err
 	}
 
@@ -199,6 +213,9 @@ func (fh *FileHandler) SaveMessage(message models.Messageable, bodyContent inter
 	}
 
 	metadataPath := filepath.Join(msgPath, "metadata.json")
+	if isPathTooLong(metadataPath) {
+		return "", &apperrors.FileSystemError{Path: metadataPath, Msg: "generated metadata file path exceeds maximum length", Err: nil}
+	}
 	metadataFile, err := os.Create(metadataPath)
 	if err != nil {
 		return "", &apperrors.FileSystemError{Path: metadataPath, Msg: "failed to create metadata file", Err: err}
@@ -253,6 +270,9 @@ func (fh *FileHandler) SaveAttachmentFromBytes(msgPath string, att models.Attach
 
 	fileName := fmt.Sprintf("%02d_%s", sequence, sanitizeFileName(*fileAttachment.GetName()))
 	filePath := filepath.Join(msgPath, "attachments", fileName)
+	if isPathTooLong(filePath) {
+		return nil, &apperrors.FileSystemError{Path: filePath, Msg: "generated attachment file path exceeds maximum length", Err: nil}
+	}
 
 	out, err := os.Create(filePath)
 	if err != nil {
@@ -359,8 +379,11 @@ func (fh *FileHandler) LoadState(stateFilePath string) (*o365client.RunState, er
 
 // sanitizeFileName removes invalid characters from a string to be used as a file name.
 func sanitizeFileName(name string) string {
-	// Replace path traversal sequences
-	sanitized := strings.ReplaceAll(name, "..", "_")
+	// Replace path traversal sequences iteratively to handle cases like "...".
+	sanitized := name
+	for strings.Contains(sanitized, "..") {
+		sanitized = strings.ReplaceAll(sanitized, "..", "_")
+	}
 
 	// Define a regex to match invalid characters for Windows/Unix file names
 	// \ is for backslash, \x00-\x1f are control characters
