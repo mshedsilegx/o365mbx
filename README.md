@@ -179,11 +179,13 @@ All configuration options can be controlled via command-line arguments. Any flag
 | `-convert-body`                 | Conversion mode for email bodies: `none`, `text`, or `pdf`.               | No       | `none`  |
 | `-chromium-path`                | Absolute path to the headless Chromium/Chrome binary (required for `pdf`).| No       |         |
 | **Performance & Limits**        |                                                                           |          |         |
-| `-parallel`                     | Maximum number of parallel workers.                                       | No       | `4`     |
-| `-timeout`                      | HTTP client timeout in seconds.                                           | No       | `60`    |
-| `-api-rate`                     | API calls per second for client-side rate limiting.                       | No       | `10`    |
+| `-parallel`                     | Maximum number of parallel workers.                                       | No       | `10`    |
+| `-timeout`                      | HTTP client timeout in seconds.                                           | No       | `120`   |
+| `-api-rate`                     | API calls per second for client-side rate limiting.                       | No       | `5.0`   |
 | `-api-burst`                    | API burst capacity for client-side rate limiting.                         | No       | `10`    |
 | `-bandwidth-limit-mbs`          | Bandwidth limit in MB/s for downloads (0 for disabled).                   | No       | `0.0`   |
+| `-large-attachment-threshold-mb` | Threshold in MB for what is considered a large attachment.                | No       | `20`    |
+| `-chunk-size-mb`                | Chunk size in MB for downloading large attachments.                       | No       | `8`     |
 
 ## Configuration File
 
@@ -197,19 +199,21 @@ For a more permanent setup, you can use a JSON file (e.g., `config.json`) and pa
   "workspacePath": "/path/to/your/output",
   "tokenString": "your-jwt-token-here",
   "debugLogging": false,
+  "healthcheck": false,
+  "messageDetailsFolder": "",
   "processingMode": "route",
   "stateFilePath": "/path/to/your/state.json",
   "inboxFolder": "Inbox",
   "processedFolder": "Processed-Archive",
   "errorFolder": "Error-Items",
-  "httpClientTimeoutSeconds": 180,
-  "largeAttachmentThresholdMB": 25,
-  "chunkSizeMB": 10,
-  "maxParallelDownloads": 15,
-  "apiCallsPerSecond": 4.0,
-  "apiBurst": 8,
-  "stateSaveInterval": 50,
-  "bandwidthLimitMBs": 100.0
+  "httpClientTimeoutSeconds": 120,
+  "maxParallelDownloads": 10,
+  "apiCallsPerSecond": 5.0,
+  "apiBurst": 10,
+  "stateSaveInterval": 100,
+  "bandwidthLimitMBs": 0.0,
+  "largeAttachmentThresholdMB": 20,
+  "chunkSizeMB": 8
 }
 ```
 
@@ -225,6 +229,8 @@ For a more permanent setup, you can use a JSON file (e.g., `config.json`) and pa
     *   `removeTokenFile`: (Boolean) Set to `true` to delete the token file after use.
 *   **General**:
     *   `debugLogging`: (Boolean) Enables debug-level logging.
+    *   `healthcheck`: (Boolean) Set to `true` to perform a health check and exit.
+    *   `messageDetailsFolder`: (String) When `healthcheck` is `true`, displays message details for the specified folder.
     *   `processingMode`: (String) `full`, `incremental`, or `route`. In `route` mode, messages are moved after processing.
     *   `inboxFolder`: (String) The source folder to process messages from. Defaults to the main `Inbox`.
     *   `stateFilePath`: (String) Absolute path to the state file for incremental mode.
@@ -236,6 +242,9 @@ For a more permanent setup, you can use a JSON file (e.g., `config.json`) and pa
     *   `apiCallsPerSecond`: (Float) The number of API calls allowed per second.
     *   `apiBurst`: (Integer) The burst capacity for the API rate limiter.
     *   `bandwidthLimitMBs`: (Float) The download speed limit in megabytes per second. `0` means disabled.
+*   **Attachments**:
+    *   `largeAttachmentThresholdMB`: (Integer) Threshold in MB for what is considered a large attachment.
+    *   `chunkSizeMB`: (Integer) Chunk size in MB for downloading large attachments.
 *   **State**:
     *   `stateSaveInterval`: (Integer) How often to save the state file during a run (number of messages).
 *   **Email Body Conversion**:
