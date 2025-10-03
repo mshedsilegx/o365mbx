@@ -17,12 +17,14 @@ type Config struct {
 	RemoveTokenFile bool   `json:"removeTokenFile,omitempty"`
 
 	// General settings
-	DebugLogging    bool   `json:"debugLogging,omitempty"`
-	ProcessingMode  string `json:"processingMode,omitempty"`
-	StateFilePath   string `json:"stateFilePath,omitempty"`
-	InboxFolder     string `json:"inboxFolder,omitempty"`
-	ProcessedFolder string `json:"processedFolder,omitempty"`
-	ErrorFolder     string `json:"errorFolder,omitempty"`
+	DebugLogging         bool   `json:"debugLogging,omitempty"`
+	ProcessingMode       string `json:"processingMode,omitempty"`
+	StateFilePath        string `json:"stateFilePath,omitempty"`
+	InboxFolder          string `json:"inboxFolder,omitempty"`
+	ProcessedFolder      string `json:"processedFolder,omitempty"`
+	ErrorFolder          string `json:"errorFolder,omitempty"`
+	HealthCheck          bool   `json:"healthcheck,omitempty"`
+	MessageDetailsFolder string `json:"messageDetailsFolder,omitempty"`
 
 	// HTTP and API settings
 	HTTPClientTimeoutSeconds int     `json:"httpClientTimeoutSeconds"`

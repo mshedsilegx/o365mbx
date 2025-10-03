@@ -32,6 +32,7 @@ func main() {
 	// Note: The -rod flag is not defined here but is handled by the underlying go-rod library.
 	// It is used to pass launch parameters to the headless chrome browser for PDF conversion.
 	// Example: -rod="--proxy-server=127.0.0.1:8080"
+	configPath := flag.String("config", "", "Path to a JSON configuration file.")
 	tokenString := flag.String("token-string", "", "JWT token as a string.")
 	tokenFile := flag.String("token-file", "", "Path to a file containing the JWT token.")
 	tokenEnv := flag.Bool("token-env", false, "Read JWT token from JWT_TOKEN environment variable.")
@@ -47,13 +48,13 @@ func main() {
 	stateFilePath := flag.String("state", "", "Path to the state file for incremental processing")
 	processedFolder := flag.String("processed-folder", "", "Destination folder for successfully processed messages in route mode.")
 	errorFolder := flag.String("error-folder", "", "Destination folder for messages that failed processing in route mode.")
-	timeoutSeconds := flag.Int("timeout", 60, "HTTP client timeout in seconds.")
-	maxParallelDownloads := flag.Int("parallel", 4, "Maximum number of parallel downloads.")
-	apiCallsPerSecond := flag.Float64("api-rate", 10, "API calls per second for client-side rate limiting.")
+	timeoutSeconds := flag.Int("timeout", 120, "HTTP client timeout in seconds.")
+	maxParallelDownloads := flag.Int("parallel", 10, "Maximum number of parallel downloads.")
+	apiCallsPerSecond := flag.Float64("api-rate", 5.0, "API calls per second for client-side rate limiting.")
 	apiBurst := flag.Int("api-burst", 10, "API burst capacity for client-side rate limiting.")
-	maxRetries := flag.Int("max-retries", 3, "Maximum number of retries for failed API calls.")
+	maxRetries := flag.Int("max-retries", 2, "Maximum number of retries for failed API calls.")
 	initialBackoffSeconds := flag.Int("initial-backoff-seconds", 5, "Initial backoff in seconds for retries.")
-	chunkSizeMB := flag.Int("chunk-size-mb", 20, "Chunk size in MB for large attachment downloads.")
+	chunkSizeMB := flag.Int("chunk-size-mb", 8, "Chunk size in MB for large attachment downloads.")
 	largeAttachmentThresholdMB := flag.Int("large-attachment-threshold-mb", 20, "Threshold in MB for large attachments.")
 	stateSaveInterval := flag.Int("state-save-interval", 100, "Save state every N messages.")
 	bandwidthLimitMBs := flag.Float64("bandwidth-limit-mbs", 0, "Bandwidth limit in MB/s for downloads (0 for disabled).")
@@ -61,34 +62,70 @@ func main() {
 	chromiumPath := flag.String("chromium-path", "", "Path to headless chromium binary for PDF conversion.")
 	flag.Parse()
 
-	cfg := &engine.Config{
-		TokenString:                *tokenString,
-		TokenFile:                  *tokenFile,
-		TokenEnv:                   *tokenEnv,
-		RemoveTokenFile:            *removeTokenFile,
-		MailboxName:                *mailboxName,
-		WorkspacePath:              *workspacePath,
-		DebugLogging:               *debug,
-		ProcessingMode:             *processingMode,
-		InboxFolder:                *inboxFolder,
-		StateFilePath:              *stateFilePath,
-		ProcessedFolder:            *processedFolder,
-		ErrorFolder:                *errorFolder,
-		HTTPClientTimeoutSeconds:   *timeoutSeconds,
-		MaxParallelDownloads:       *maxParallelDownloads,
-		APICallsPerSecond:          *apiCallsPerSecond,
-		APIBurst:                   *apiBurst,
-		MaxRetries:                 *maxRetries,
-		InitialBackoffSeconds:      *initialBackoffSeconds,
-		ChunkSizeMB:                *chunkSizeMB,
-		LargeAttachmentThresholdMB: *largeAttachmentThresholdMB,
-		StateSaveInterval:          *stateSaveInterval,
-		BandwidthLimitMBs:          *bandwidthLimitMBs,
-		ConvertBody:                *convertBody,
-		ChromiumPath:               *chromiumPath,
+	// --- Configuration Loading ---
+	cfg, err := engine.LoadConfig(*configPath)
+	if err != nil {
+		log.Fatalf("Error loading configuration: %v", err)
 	}
 
-	cfg.SetDefaults()
+	// --- Command-line Override ---
+	// Override config file settings with any flags set on the command line.
+	flag.Visit(func(f *flag.Flag) {
+		switch f.Name {
+		case "token-string":
+			cfg.TokenString = *tokenString
+		case "token-file":
+			cfg.TokenFile = *tokenFile
+		case "token-env":
+			cfg.TokenEnv = *tokenEnv
+		case "remove-token-file":
+			cfg.RemoveTokenFile = *removeTokenFile
+		case "mailbox":
+			cfg.MailboxName = *mailboxName
+		case "workspace":
+			cfg.WorkspacePath = *workspacePath
+		case "debug":
+			cfg.DebugLogging = *debug
+		case "processing-mode":
+			cfg.ProcessingMode = *processingMode
+		case "inbox-folder":
+			cfg.InboxFolder = *inboxFolder
+		case "state":
+			cfg.StateFilePath = *stateFilePath
+		case "processed-folder":
+			cfg.ProcessedFolder = *processedFolder
+		case "error-folder":
+			cfg.ErrorFolder = *errorFolder
+		case "timeout":
+			cfg.HTTPClientTimeoutSeconds = *timeoutSeconds
+		case "parallel":
+			cfg.MaxParallelDownloads = *maxParallelDownloads
+		case "api-rate":
+			cfg.APICallsPerSecond = *apiCallsPerSecond
+		case "api-burst":
+			cfg.APIBurst = *apiBurst
+		case "max-retries":
+			cfg.MaxRetries = *maxRetries
+		case "initial-backoff-seconds":
+			cfg.InitialBackoffSeconds = *initialBackoffSeconds
+		case "chunk-size-mb":
+			cfg.ChunkSizeMB = *chunkSizeMB
+		case "large-attachment-threshold-mb":
+			cfg.LargeAttachmentThresholdMB = *largeAttachmentThresholdMB
+		case "state-save-interval":
+			cfg.StateSaveInterval = *stateSaveInterval
+		case "bandwidth-limit-mbs":
+			cfg.BandwidthLimitMBs = *bandwidthLimitMBs
+		case "convert-body":
+			cfg.ConvertBody = *convertBody
+		case "chromium-path":
+			cfg.ChromiumPath = *chromiumPath
+		case "healthcheck":
+			cfg.HealthCheck = *healthCheck
+		case "message-details":
+			cfg.MessageDetailsFolder = *messageDetailsFolder
+		}
+	})
 
 	// --- Logging Setup ---
 	log.SetFormatter(&log.TextFormatter{FullTimestamp: true})
@@ -134,7 +171,7 @@ func main() {
 		log.Fatalf("Error: Invalid mailbox name format: %s", cfg.MailboxName)
 	}
 	// Workspace is only required if we are not in health check mode.
-	if !*healthCheck && cfg.WorkspacePath == "" {
+	if !cfg.HealthCheck && cfg.WorkspacePath == "" {
 		log.Fatal("Error: Workspace path is a required argument (set via -workspace or in config file).")
 	}
 	if cfg.ProcessingMode == "incremental" && cfg.StateFilePath == "" {
@@ -159,9 +196,9 @@ func main() {
 	fileHandler := filehandler.NewFileHandler(cfg.WorkspacePath, o365Client, emailProcessor, cfg.LargeAttachmentThresholdMB, cfg.ChunkSizeMB, cfg.BandwidthLimitMBs, logger)
 
 	// --- Health Check or Main Engine Execution ---
-	if *healthCheck {
-		if *messageDetailsFolder != "" {
-			presenter.RunMessageDetailsMode(ctx, o365Client, cfg.MailboxName, *messageDetailsFolder)
+	if cfg.HealthCheck {
+		if cfg.MessageDetailsFolder != "" {
+			presenter.RunMessageDetailsMode(ctx, o365Client, cfg.MailboxName, cfg.MessageDetailsFolder)
 		} else {
 			presenter.RunHealthCheckMode(ctx, o365Client, cfg.MailboxName)
 		}
