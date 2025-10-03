@@ -32,6 +32,7 @@ func main() {
 	// Note: The -rod flag is not defined here but is handled by the underlying go-rod library.
 	// It is used to pass launch parameters to the headless chrome browser for PDF conversion.
 	// Example: -rod="--proxy-server=127.0.0.1:8080"
+	configPath := flag.String("config", "", "Path to a JSON configuration file.")
 	tokenString := flag.String("token-string", "", "JWT token as a string.")
 	tokenFile := flag.String("token-file", "", "Path to a file containing the JWT token.")
 	tokenEnv := flag.Bool("token-env", false, "Read JWT token from JWT_TOKEN environment variable.")
@@ -61,34 +62,66 @@ func main() {
 	chromiumPath := flag.String("chromium-path", "", "Path to headless chromium binary for PDF conversion.")
 	flag.Parse()
 
-	cfg := &engine.Config{
-		TokenString:                *tokenString,
-		TokenFile:                  *tokenFile,
-		TokenEnv:                   *tokenEnv,
-		RemoveTokenFile:            *removeTokenFile,
-		MailboxName:                *mailboxName,
-		WorkspacePath:              *workspacePath,
-		DebugLogging:               *debug,
-		ProcessingMode:             *processingMode,
-		InboxFolder:                *inboxFolder,
-		StateFilePath:              *stateFilePath,
-		ProcessedFolder:            *processedFolder,
-		ErrorFolder:                *errorFolder,
-		HTTPClientTimeoutSeconds:   *timeoutSeconds,
-		MaxParallelDownloads:       *maxParallelDownloads,
-		APICallsPerSecond:          *apiCallsPerSecond,
-		APIBurst:                   *apiBurst,
-		MaxRetries:                 *maxRetries,
-		InitialBackoffSeconds:      *initialBackoffSeconds,
-		ChunkSizeMB:                *chunkSizeMB,
-		LargeAttachmentThresholdMB: *largeAttachmentThresholdMB,
-		StateSaveInterval:          *stateSaveInterval,
-		BandwidthLimitMBs:          *bandwidthLimitMBs,
-		ConvertBody:                *convertBody,
-		ChromiumPath:               *chromiumPath,
+	// --- Configuration Loading ---
+	cfg, err := engine.LoadConfig(*configPath)
+	if err != nil {
+		log.Fatalf("Error loading configuration: %v", err)
 	}
 
-	cfg.SetDefaults()
+	// --- Command-line Override ---
+	// Override config file settings with any flags set on the command line.
+	flag.Visit(func(f *flag.Flag) {
+		switch f.Name {
+		case "token-string":
+			cfg.TokenString = *tokenString
+		case "token-file":
+			cfg.TokenFile = *tokenFile
+		case "token-env":
+			cfg.TokenEnv = *tokenEnv
+		case "remove-token-file":
+			cfg.RemoveTokenFile = *removeTokenFile
+		case "mailbox":
+			cfg.MailboxName = *mailboxName
+		case "workspace":
+			cfg.WorkspacePath = *workspacePath
+		case "debug":
+			cfg.DebugLogging = *debug
+		case "processing-mode":
+			cfg.ProcessingMode = *processingMode
+		case "inbox-folder":
+			cfg.InboxFolder = *inboxFolder
+		case "state":
+			cfg.StateFilePath = *stateFilePath
+		case "processed-folder":
+			cfg.ProcessedFolder = *processedFolder
+		case "error-folder":
+			cfg.ErrorFolder = *errorFolder
+		case "timeout":
+			cfg.HTTPClientTimeoutSeconds = *timeoutSeconds
+		case "parallel":
+			cfg.MaxParallelDownloads = *maxParallelDownloads
+		case "api-rate":
+			cfg.APICallsPerSecond = *apiCallsPerSecond
+		case "api-burst":
+			cfg.APIBurst = *apiBurst
+		case "max-retries":
+			cfg.MaxRetries = *maxRetries
+		case "initial-backoff-seconds":
+			cfg.InitialBackoffSeconds = *initialBackoffSeconds
+		case "chunk-size-mb":
+			cfg.ChunkSizeMB = *chunkSizeMB
+		case "large-attachment-threshold-mb":
+			cfg.LargeAttachmentThresholdMB = *largeAttachmentThresholdMB
+		case "state-save-interval":
+			cfg.StateSaveInterval = *stateSaveInterval
+		case "bandwidth-limit-mbs":
+			cfg.BandwidthLimitMBs = *bandwidthLimitMBs
+		case "convert-body":
+			cfg.ConvertBody = *convertBody
+		case "chromium-path":
+			cfg.ChromiumPath = *chromiumPath
+		}
+	})
 
 	// --- Logging Setup ---
 	log.SetFormatter(&log.TextFormatter{FullTimestamp: true})
