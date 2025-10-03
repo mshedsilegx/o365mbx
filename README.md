@@ -183,6 +183,8 @@ All configuration options can be controlled via command-line arguments. Any flag
 | `-timeout`                      | HTTP client timeout in seconds.                                           | No       | `120`   |
 | `-api-rate`                     | API calls per second for client-side rate limiting.                       | No       | `5.0`   |
 | `-api-burst`                    | API burst capacity for client-side rate limiting.                         | No       | `10`    |
+| `-max-retries`                  | Maximum number of retries for failed API calls.                           | No       | `2`     |
+| `-initial-backoff-seconds`      | Initial backoff in seconds for retries.                                   | No       | `5`     |
 | `-bandwidth-limit-mbs`          | Bandwidth limit in MB/s for downloads (0 for disabled).                   | No       | `0.0`   |
 | `-large-attachment-threshold-mb` | Threshold in MB for what is considered a large attachment.                | No       | `20`    |
 | `-chunk-size-mb`                | Chunk size in MB for downloading large attachments.                       | No       | `8`     |
@@ -207,6 +209,8 @@ For a more permanent setup, you can use a JSON file (e.g., `config.json`) and pa
   "processedFolder": "Processed-Archive",
   "errorFolder": "Error-Items",
   "httpClientTimeoutSeconds": 120,
+  "maxRetries": 2,
+  "initialBackoffSeconds": 5,
   "maxParallelDownloads": 10,
   "apiCallsPerSecond": 5.0,
   "apiBurst": 10,
@@ -231,13 +235,17 @@ For a more permanent setup, you can use a JSON file (e.g., `config.json`) and pa
     *   `debugLogging`: (Boolean) Enables debug-level logging.
     *   `healthcheck`: (Boolean) Set to `true` to perform a health check and exit.
     *   `messageDetailsFolder`: (String) When `healthcheck` is `true`, displays message details for the specified folder.
+*   **Processing & State**:
     *   `processingMode`: (String) `full`, `incremental`, or `route`. In `route` mode, messages are moved after processing.
     *   `inboxFolder`: (String) The source folder to process messages from. Defaults to the main `Inbox`.
     *   `stateFilePath`: (String) Absolute path to the state file for incremental mode.
+    *   `stateSaveInterval`: (Integer) How often to save the state file during a run (number of messages).
     *   `processedFolder`: (String) The destination folder for successfully processed messages in `route` mode.
     *   `errorFolder`: (String) The destination folder for messages that failed processing in `route` mode.
-*   **HTTP and API**:
+*   **Performance & Limits**:
     *   `httpClientTimeoutSeconds`: (Integer) Timeout in seconds for HTTP requests.
+    *   `maxRetries`: (Integer) The maximum number of retries for failed API calls.
+    *   `initialBackoffSeconds`: (Integer) The initial backoff in seconds for retries.
     *   `maxParallelDownloads`: (Integer) The maximum number of concurrent workers.
     *   `apiCallsPerSecond`: (Float) The number of API calls allowed per second.
     *   `apiBurst`: (Integer) The burst capacity for the API rate limiter.
@@ -245,8 +253,6 @@ For a more permanent setup, you can use a JSON file (e.g., `config.json`) and pa
 *   **Attachments**:
     *   `largeAttachmentThresholdMB`: (Integer) Threshold in MB for what is considered a large attachment.
     *   `chunkSizeMB`: (Integer) Chunk size in MB for downloading large attachments.
-*   **State**:
-    *   `stateSaveInterval`: (Integer) How often to save the state file during a run (number of messages).
 *   **Email Body Conversion**:
     *   `convertBody`: (String) The conversion mode for email bodies. Can be `none` (no conversion, saves `.html`), `text` (converts to plain text, saves `.txt`), or `pdf` (converts to PDF, saves `.pdf`). Defaults to `none`.
     *   `chromiumPath`: (String) The absolute path to a headless Chromium or Google Chrome binary. This is **required** if `convertBody` is set to `pdf`.
