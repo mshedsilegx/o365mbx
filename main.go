@@ -120,6 +120,10 @@ func main() {
 			cfg.ConvertBody = *convertBody
 		case "chromium-path":
 			cfg.ChromiumPath = *chromiumPath
+		case "healthcheck":
+			cfg.HealthCheck = *healthCheck
+		case "message-details":
+			cfg.MessageDetailsFolder = *messageDetailsFolder
 		}
 	})
 
@@ -167,7 +171,7 @@ func main() {
 		log.Fatalf("Error: Invalid mailbox name format: %s", cfg.MailboxName)
 	}
 	// Workspace is only required if we are not in health check mode.
-	if !*healthCheck && cfg.WorkspacePath == "" {
+	if !cfg.HealthCheck && cfg.WorkspacePath == "" {
 		log.Fatal("Error: Workspace path is a required argument (set via -workspace or in config file).")
 	}
 	if cfg.ProcessingMode == "incremental" && cfg.StateFilePath == "" {
@@ -192,9 +196,9 @@ func main() {
 	fileHandler := filehandler.NewFileHandler(cfg.WorkspacePath, o365Client, emailProcessor, cfg.LargeAttachmentThresholdMB, cfg.ChunkSizeMB, cfg.BandwidthLimitMBs, logger)
 
 	// --- Health Check or Main Engine Execution ---
-	if *healthCheck {
-		if *messageDetailsFolder != "" {
-			presenter.RunMessageDetailsMode(ctx, o365Client, cfg.MailboxName, *messageDetailsFolder)
+	if cfg.HealthCheck {
+		if cfg.MessageDetailsFolder != "" {
+			presenter.RunMessageDetailsMode(ctx, o365Client, cfg.MailboxName, cfg.MessageDetailsFolder)
 		} else {
 			presenter.RunHealthCheckMode(ctx, o365Client, cfg.MailboxName)
 		}
