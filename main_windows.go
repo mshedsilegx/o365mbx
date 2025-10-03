@@ -46,7 +46,6 @@ func checkLongPathSupport() {
 		return
 	}
 
-
 	if val != 1 {
 		fatalMsg := fmt.Sprintf("FATAL: Long path support is not enabled on this Windows system, but is required by o365mbx. The 'LongPathsEnabled' registry key is set to %d.", val)
 		log.Fatalf("%s\n%s", fatalMsg, longPathHelpText)
