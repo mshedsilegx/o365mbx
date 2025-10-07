@@ -8,14 +8,11 @@ import (
 	"strings"
 	"time"
 
-	"net/http"
 	"o365mbx/apperrors"
 
-	msgraphsdk "github.com/microsoftgraph/msgraph-sdk-go"
-	"github.com/microsoft/kiota-http-go/middleware"
 	kiotahttp "github.com/microsoft/kiota-http-go"
+	msgraphsdk "github.com/microsoftgraph/msgraph-sdk-go"
 	"github.com/microsoftgraph/msgraph-sdk-go/models"
-	"golang.org/x/time/rate"
 	"github.com/microsoftgraph/msgraph-sdk-go/models/odataerrors"
 	"github.com/microsoftgraph/msgraph-sdk-go/users"
 	log "github.com/sirupsen/logrus"
@@ -64,35 +61,25 @@ func NewO365Client(accessToken string, timeout time.Duration, maxRetries int, in
 		return nil, fmt.Errorf("failed to create auth provider: %w", err)
 	}
 
-	// Define the middleware chain
-	retryHandler, err := middleware.NewRetryHandlerWithOptions(middleware.RetryHandlerOptions{
-		MaxRetries: maxRetries,
-		Delay:      time.Duration(initialBackoffSeconds) * time.Second,
+	retryHandler := kiotahttp.NewRetryHandlerWithOptions(kiotahttp.RetryHandlerOptions{
+		MaxRetries:   maxRetries,
+		DelaySeconds: initialBackoffSeconds,
 	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to create retry handler: %w", err)
-	}
 
-	rateLimitHandler, err := middleware.NewRateLimitHandlerWithOptions(middleware.RateLimitHandlerOptions{
-		Limiter: rate.NewLimiter(rate.Limit(apiCallsPerSecond), apiBurst),
-	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to create rate limit handler: %w", err)
-	}
-
-	middlewareChain := kiotahttp.GetDefaultMiddlewareChain(
+	middlewareChain := []kiotahttp.Middleware{
 		retryHandler,
-		rateLimitHandler,
-	)
+		kiotahttp.NewRedirectHandler(),
+		kiotahttp.NewCompressionHandler(),
+		kiotahttp.NewParametersNameDecodingHandler(),
+		kiotahttp.NewUserAgentHandler(),
+	}
 
-	// Create a custom HTTP client with the middleware chain and timeout
 	httpClient := kiotahttp.GetDefaultClient(middlewareChain...)
 	httpClient.Timeout = timeout
 
-	// Create an adapter with the custom client
 	adapter, err := msgraphsdk.NewGraphRequestAdapterWithParseNodeFactoryAndSerializationWriterFactoryAndHttpClient(
 		authProvider,
-		nil, nil, // Use default factories
+		nil, nil,
 		httpClient,
 	)
 	if err != nil {

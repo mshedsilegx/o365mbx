@@ -6,19 +6,18 @@ It is designed for high-performance, parallelized downloading and is robust and 
 
 ## Features
 
-*   **High-Performance Parallel Processing**: Utilizes a decoupled producer-consumer architecture to download multiple messages and attachments concurrently, maximizing throughput within configurable API limits.
-*   **Reliable Attachment Handling**: Uses a two-phase download strategy. It first fetches messages and then fetches attachments for each message individually. This approach improves reliability and reduces memory usage, preventing API timeouts when processing mailboxes with large numbers of attachments.
-*   **Email and Attachment Download**: Downloads emails and their attachments from a specified O365 mailbox.
-*   **HTML to Plain Text Conversion**: Cleans email bodies by converting HTML to plain text, preserving links and image alt text.
-*   **Incremental Downloads**: Performs incremental downloads by saving the timestamp of the last run, fetching only new emails since that time.
-*   **Robust Error Handling**: Implements custom error types for better error identification and handling.
-*   **Configurable Retry Mechanism**: Uses the Microsoft Graph SDK's built-in retry mechanism to handle transient network errors and API rate limiting.
+*   **High-Performance Parallel Processing**: Utilizes a decoupled producer-consumer architecture with independent worker pools for message processing (CPU-bound) and attachment downloading (I/O-bound). This prevents resource contention and maximizes throughput.
+*   **Memory-Efficient Streaming Downloads**: Handles attachments of any size with a minimal memory footprint. Small attachments are handled inline, while large attachments are streamed directly from the server to disk, avoiding out-of-memory errors on multi-gigabyte files.
+*   **Resumable Attachment Downloads**: If a download is interrupted, the application automatically resumes from where it left off for each message, preventing data loss and saving significant time and bandwidth.
+*   **Guaranteed Data Integrity**: Critical metadata files are written atomically using a "write-and-rename" strategy, which prevents file corruption even if the application crashes.
+*   **Incremental Mailbox Sync**: Performs efficient incremental synchronization using Microsoft Graph delta queries, fetching only new or changed items on subsequent runs.
+*   **Robust API Interaction**: Implements a configurable client-side rate limiter and retry mechanism to gracefully handle API throttling and transient network errors, ensuring stable performance.
 *   **Flexible Configuration**: Supports configuration via both a JSON file and command-line arguments, with arguments overriding file settings.
-*   **Bandwidth Limiting**: Allows throttling of download bandwidth to avoid hitting data egress limits on large-scale downloads.
-*   **Secure Token Management**: Provides multiple, mutually exclusive options for securely supplying the access token.
-*   **Health Check Mode**: Provides a "health check" mode to verify connectivity and authentication with the O365 mailbox without performing a full download.
+*   **Bandwidth Limiting**: Allows throttling of download bandwidth to avoid hitting data egress limits.
+*   **Secure Token Management**: Provides multiple, mutually exclusive options for securely supplying the access token, including auto-removal of token files.
+*   **Health Check Mode**: Provides a "health check" mode to verify connectivity, authentication, and mailbox statistics without performing a full download.
+*   **Advanced Body Conversion**: Can convert email bodies from HTML to clean plain text or searchable PDFs, with fine-grained control over the underlying browser engine.
 *   **Structured Logging**: Uses `logrus` for structured and informative logging, with a configurable debug level.
-*   **Advanced PDF Conversion Control**: For users converting emails to PDF, the application provides a `-rod` flag. This flag allows passing launch arguments directly to the underlying `go-rod` headless browser instance. For example, to use a proxy, you could pass `-rod="--proxy-server=127.0.0.1:8080"`. This provides fine-grained control over the browser environment used for conversion.
 
     > **Security Warning:** The `-rod` flag passes arguments directly to the underlying browser engine. Use this feature with caution and only with trusted arguments to avoid potential command injection vulnerabilities.
 
@@ -178,8 +177,6 @@ All configuration options can be controlled via command-line arguments. Any flag
 | **Email Body Conversion**       |                                                                           |          |         |
 | `-convert-body`                 | Conversion mode for email bodies: `none`, `text`, or `pdf`.               | No       | `none`  |
 | `-chromium-path`                | Absolute path to the headless Chromium/Chrome binary (required for `pdf`).| No       |         |
-| **Performance & Limits**        |                                                                           |          |         |
-| `-parallel-processors`          | Maximum number of parallel message processors.                            | No       | `4`     |
 | **Performance & Limits**        |                                                                           |          |         |
 | `-parallel-processors`          | Maximum number of parallel message processors.                            | No       | `4`     |
 | `-parallel-downloads`           | Maximum number of parallel attachment downloaders.                        | No       | `10`    |

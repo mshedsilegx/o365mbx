@@ -46,8 +46,6 @@ The application employs a sophisticated producer-consumer pattern using Go's gor
 
 *   **Channels (`messagesChan`, `attachmentsChan`, `resultsChan`):** Act as buffered queues, facilitating safe and efficient communication between different stages of the pipeline.
 
-*   **`sync.Map` for State Management:** The engine uses a `sync.Map` to safely track the download state of each message being processed concurrently. This provides a scalable and efficient way to manage state without the bottleneck of a single global mutex.
-
 *   **`sync.WaitGroup`:** Used to synchronize the completion of all producer, processor, downloader, and aggregator goroutines, ensuring the application exits gracefully only after all tasks are done.
 
 *   **Decoupled Semaphores (`chan struct{}`):** The engine uses two separate semaphores to independently control the concurrency of processors and downloaders. This prevents resource contention between the CPU-bound processing tasks and the I/O-bound downloading tasks, allowing for more efficient scaling and better performance. The `processorSemaphore` limits the number of active message processors, while the `downloaderSemaphore` limits the number of concurrent attachment downloads.
@@ -70,7 +68,7 @@ This streaming approach provides significant performance and memory benefits:
 
 This dual strategy ensures that the application uses the most efficient method available for any given attachment size, providing both high performance and robust handling of large mailboxes.
 
-## Robustness and Error Handling:
+## Core Error Handling:
 
 The application is designed to be highly resilient against network issues, API limitations, and file system errors.
 
@@ -89,6 +87,22 @@ The application is designed to be highly resilient against network issues, API l
 *   **Workspace Validation and Security:** The `filehandler` package includes robust validation for the `workspacePath`. It ensures the path is absolute, prevents the use of critical system directories, and checks that the workspace is a legitimate directory (not a symbolic link). Filenames are sanitized to prevent path traversal attacks, and total path length is checked to avoid filesystem errors.
 
 *   **Bandwidth Limiting:** An optional `bandwidthLimiter` in `filehandler` allows users to cap the download speed of attachments, which can be useful in environments with limited network capacity.
+
+## Advanced Robustness and Scalability Features
+
+Beyond core error handling, the application implements several advanced features to ensure data integrity, resilience, and scalability during large-scale runs.
+
+*   **Resilient Attachment Downloads:** To prevent data loss from interruptions (e.g., network failure or `Ctrl+C`), the application uses a persistent, file-based state for attachment downloads.
+    1.  When processing a message with attachments, a temporary state file (`.download_state.json`) is created in the message's directory.
+    2.  As each attachment is successfully downloaded, this state file is atomically updated.
+    3.  If the application is restarted, it checks for this file. If found, it resumes downloading only the missing attachments.
+    4.  The state file is deleted only after all attachments are successfully downloaded and the final `metadata.json` is written.
+
+*   **Atomic File Writes:** All critical JSON files (`metadata.json`, `.download_state.json`) are written using a "write-and-rename" strategy. The content is first written to a temporary file (e.g., `metadata.json.tmp`), and only after the write is successful is the file atomically renamed to its final destination. This guarantees that the primary files can never be left in a corrupted, half-written state.
+
+*   **Efficient Folder Search:** To locate folders (e.g., in `route` mode), the application uses an efficient, case-insensitive OData filter (`$filter=tolower(displayName) eq '...'`). This pushes the search operation to the server, avoiding the need to download the entire folder list, which significantly improves performance for mailboxes with many folders.
+
+*   **Memory-Safe Mutex Pooling:** To prevent unbounded memory growth when processing millions of files, the `filehandler` uses a fixed-size pool of mutexes for file-level synchronization. A file path is hashed to an index in the pool, ensuring that file operations are safe without the risk of creating an unlimited number of mutex objects.
 
 ## Configuration Management:
 
