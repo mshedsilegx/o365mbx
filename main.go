@@ -218,7 +218,7 @@ func main() {
 		}
 	}()
 
-	engine.RunEngine(ctx, cfg, o365Client, emailProcessor, fileHandler, accessToken, version)
+	engine.RunEngine(ctx, cfg, o365Client, emailProcessor, fileHandler, version)
 }
 
 func loadAccessToken(cfg *engine.Config) (string, error) {

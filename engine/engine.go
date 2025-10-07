@@ -46,14 +46,7 @@ type MessageState struct {
 	HasFailed      bool
 }
 
-type DownloadState struct {
-	ExpectedAttachments  int
-	CompletedAttachments int
-	Attachments          []filehandler.AttachmentMetadata
-	Mu                   sync.Mutex
-}
-
-func RunEngine(ctx context.Context, cfg *Config, o365Client o365client.O365ClientInterface, emailProcessor emailprocessor.EmailProcessorInterface, fileHandler filehandler.FileHandlerInterface, accessToken, version string) {
+func RunEngine(ctx context.Context, cfg *Config, o365Client o365client.O365ClientInterface, emailProcessor emailprocessor.EmailProcessorInterface, fileHandler filehandler.FileHandlerInterface, version string) {
 	stats := &RunStats{}
 	startTime := time.Now()
 
@@ -80,26 +73,10 @@ func RunEngine(ctx context.Context, cfg *Config, o365Client o365client.O365Clien
 	}
 	log.WithField("path", cfg.WorkspacePath).Infof("Workspace created.")
 
-	runDownloadMode(ctx, cfg, o365Client, emailProcessor, fileHandler, accessToken, stats)
+	runDownloadMode(ctx, cfg, o365Client, emailProcessor, fileHandler, stats)
 }
 
-func runDownloadMode(ctx context.Context, cfg *Config, o365Client o365client.O365ClientInterface, emailProcessor emailprocessor.EmailProcessorInterface, fileHandler filehandler.FileHandlerInterface, accessToken string, stats *RunStats) {
-	var messageStates sync.Map
-
-	defer func() {
-		// Cleanup check for any unprocessed message states
-		messageStates.Range(func(key, value interface{}) bool {
-			messageID := key.(string)
-			state := value.(*DownloadState)
-			log.WithFields(log.Fields{
-				"messageID":            messageID,
-				"expectedAttachments":  state.ExpectedAttachments,
-				"completedAttachments": state.CompletedAttachments,
-			}).Warn("Shutdown with unprocessed message state, attachments may be incomplete.")
-			return true // continue iterating
-		})
-	}()
-
+func runDownloadMode(ctx context.Context, cfg *Config, o365Client o365client.O365ClientInterface, emailProcessor emailprocessor.EmailProcessorInterface, fileHandler filehandler.FileHandlerInterface, stats *RunStats) {
 	var state *o365client.RunState
 	var err error
 	if cfg.ProcessingMode == "incremental" {
@@ -205,22 +182,54 @@ func runDownloadMode(ctx context.Context, cfg *Config, o365Client o365client.O36
 
 					if len(attachments) > 0 {
 						log.WithFields(log.Fields{"count": len(attachments), "messageID": *msg.GetId()}).Infof("Found attachments.")
-						messageStates.Store(*msg.GetId(), &DownloadState{
-							ExpectedAttachments: len(attachments),
-							Attachments:         make([]filehandler.AttachmentMetadata, 0, len(attachments)),
-						})
+
+						// --- Resilient Download State Handling ---
+						downloadState, found, err := fileHandler.LoadDownloadState(msgPath)
+						if err != nil {
+							atomic.AddUint32(&stats.NonFatalErrors, 1)
+							log.WithFields(log.Fields{"messageID": *msg.GetId(), "error": err}).Error("Failed to load attachment download state, skipping attachments for this message.")
+							<-processorSemaphore
+							continue
+						}
+
+						completedAttachments := make(map[string]struct{})
+						if found {
+							log.WithFields(log.Fields{
+								"messageID": *msg.GetId(),
+								"completed": len(downloadState.CompletedAttachments),
+								"expected":  downloadState.ExpectedAttachments,
+							}).Info("Resuming attachment download for message.")
+							for _, att := range downloadState.CompletedAttachments {
+								completedAttachments[att.Name] = struct{}{}
+							}
+						} else {
+							// Create a new state file for a new download
+							initialState := &filehandler.DownloadState{
+								ExpectedAttachments:  len(attachments),
+								CompletedAttachments: make([]filehandler.AttachmentMetadata, 0, len(attachments)),
+							}
+							if err := fileHandler.SaveDownloadState(msgPath, initialState); err != nil {
+								atomic.AddUint32(&stats.NonFatalErrors, 1)
+								log.WithFields(log.Fields{"messageID": *msg.GetId(), "error": err}).Error("Failed to create initial attachment download state, skipping attachments for this message.")
+								<-processorSemaphore
+								continue
+							}
+						}
 
 						if cfg.ProcessingMode == "route" {
 							totalTasks := 1 + len(attachments)
 							resultsChan <- ProcessingResult{MessageID: *msg.GetId(), Err: processingErr, IsInitialization: true, TotalTasks: totalTasks}
 						}
 
+						// Dispatch jobs only for attachments that have not been completed.
 						for i, att := range attachments {
-							attachmentsChan <- AttachmentJob{
-								Attachment: att,
-								MessageID:  *msg.GetId(),
-								MsgPath:    msgPath,
-								Sequence:   i + 1,
+							if _, ok := completedAttachments[*att.GetName()]; !ok {
+								attachmentsChan <- AttachmentJob{
+									Attachment: att,
+									MessageID:  *msg.GetId(),
+									MsgPath:    msgPath,
+									Sequence:   i + 1,
+								}
 							}
 						}
 					} else { // hasAttachments was true, but API returned none.
@@ -283,27 +292,40 @@ func runDownloadMode(ctx context.Context, cfg *Config, o365Client o365client.O36
 					atomic.AddUint32(&stats.AttachmentsProcessed, 1)
 				}
 
-				// Always update state to prevent memory leaks, even on failure.
-				if rawState, ok := messageStates.Load(job.MessageID); ok {
-					state := rawState.(*DownloadState)
-					state.Mu.Lock()
-					state.CompletedAttachments++
-					if err == nil { // Only append metadata on success
-						state.Attachments = append(state.Attachments, *attMetadata)
-					}
-					isLastAttachment := state.CompletedAttachments == state.ExpectedAttachments
-					state.Mu.Unlock()
+				// --- Resilient State Update ---
+				if err == nil {
+					// On successful download, update the persistent state.
+					downloadState, found, loadErr := fileHandler.LoadDownloadState(job.MsgPath)
+					if loadErr != nil {
+						atomic.AddUint32(&stats.NonFatalErrors, 1)
+						log.WithFields(log.Fields{"messageID": job.MessageID, "error": loadErr}).Error("Failed to load download state for update, metadata may be incomplete.")
+					} else if !found {
+						atomic.AddUint32(&stats.NonFatalErrors, 1)
+						log.WithFields(log.Fields{"messageID": job.MessageID}).Error("State file not found for a downloaded attachment, this should not happen.")
+					} else {
+						downloadState.CompletedAttachments = append(downloadState.CompletedAttachments, *attMetadata)
 
-					if isLastAttachment {
-						log.WithField("messageID", job.MessageID).Info("All attachments for message downloaded, writing final metadata.")
-						metaErr := fileHandler.WriteAttachmentsToMetadata(job.MsgPath, state.Attachments)
-						if metaErr != nil {
+						if saveErr := fileHandler.SaveDownloadState(job.MsgPath, downloadState); saveErr != nil {
 							atomic.AddUint32(&stats.NonFatalErrors, 1)
-							log.WithFields(log.Fields{"messageID": job.MessageID, "error": metaErr}).Error("Failed to write final metadata.")
-							err = metaErr // The metadata error takes precedence for the final report.
+							log.WithFields(log.Fields{"messageID": job.MessageID, "error": saveErr}).Error("Failed to save updated download state.")
 						}
-						// Clean up state for the message
-						messageStates.Delete(job.MessageID)
+
+						// Check if all attachments for the message are now complete.
+						if len(downloadState.CompletedAttachments) == downloadState.ExpectedAttachments {
+							log.WithField("messageID", job.MessageID).Info("All attachments for message downloaded, writing final metadata.")
+							metaErr := fileHandler.WriteAttachmentsToMetadata(job.MsgPath, downloadState.CompletedAttachments)
+							if metaErr != nil {
+								atomic.AddUint32(&stats.NonFatalErrors, 1)
+								log.WithFields(log.Fields{"messageID": job.MessageID, "error": metaErr}).Error("Failed to write final metadata.")
+								err = metaErr // The metadata error takes precedence for the final report.
+							} else {
+								// Clean up the temporary state file on success.
+								if delErr := fileHandler.DeleteDownloadState(job.MsgPath); delErr != nil {
+									atomic.AddUint32(&stats.NonFatalErrors, 1)
+									log.WithFields(log.Fields{"messageID": job.MessageID, "error": delErr}).Warn("Failed to delete temporary download state file.")
+								}
+							}
+						}
 					}
 				}
 

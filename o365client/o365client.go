@@ -8,10 +8,14 @@ import (
 	"strings"
 	"time"
 
+	"net/http"
 	"o365mbx/apperrors"
 
 	msgraphsdk "github.com/microsoftgraph/msgraph-sdk-go"
+	"github.com/microsoft/kiota-http-go/middleware"
+	kiotahttp "github.com/microsoft/kiota-http-go"
 	"github.com/microsoftgraph/msgraph-sdk-go/models"
+	"golang.org/x/time/rate"
 	"github.com/microsoftgraph/msgraph-sdk-go/models/odataerrors"
 	"github.com/microsoftgraph/msgraph-sdk-go/users"
 	log "github.com/sirupsen/logrus"
@@ -60,9 +64,39 @@ func NewO365Client(accessToken string, timeout time.Duration, maxRetries int, in
 		return nil, fmt.Errorf("failed to create auth provider: %w", err)
 	}
 
-	adapter, err := msgraphsdk.NewGraphRequestAdapter(authProvider)
+	// Define the middleware chain
+	retryHandler, err := middleware.NewRetryHandlerWithOptions(middleware.RetryHandlerOptions{
+		MaxRetries: maxRetries,
+		Delay:      time.Duration(initialBackoffSeconds) * time.Second,
+	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to create graph adapter: %w", err)
+		return nil, fmt.Errorf("failed to create retry handler: %w", err)
+	}
+
+	rateLimitHandler, err := middleware.NewRateLimitHandlerWithOptions(middleware.RateLimitHandlerOptions{
+		Limiter: rate.NewLimiter(rate.Limit(apiCallsPerSecond), apiBurst),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to create rate limit handler: %w", err)
+	}
+
+	middlewareChain := kiotahttp.GetDefaultMiddlewareChain(
+		retryHandler,
+		rateLimitHandler,
+	)
+
+	// Create a custom HTTP client with the middleware chain and timeout
+	httpClient := kiotahttp.GetDefaultClient(middlewareChain...)
+	httpClient.Timeout = timeout
+
+	// Create an adapter with the custom client
+	adapter, err := msgraphsdk.NewGraphRequestAdapterWithParseNodeFactoryAndSerializationWriterFactoryAndHttpClient(
+		authProvider,
+		nil, nil, // Use default factories
+		httpClient,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create graph adapter with custom client: %w", err)
 	}
 
 	client := msgraphsdk.NewGraphServiceClient(adapter)
@@ -169,8 +203,11 @@ func (c *O365Client) GetMessageAttachments(ctx context.Context, mailboxName, mes
 }
 
 // GetOrCreateFolderIDByName gets the ID of a folder by name, creating it if it doesn't exist.
+// It uses a case-insensitive search for maximum compatibility.
 func (c *O365Client) GetOrCreateFolderIDByName(ctx context.Context, mailboxName, folderName string) (string, error) {
-	filter := fmt.Sprintf("displayName eq '%s'", folderName)
+	// Use a case-insensitive filter by converting the displayName to lower case in the query.
+	// Note the single quotes around the folder name are required by the OData spec.
+	filter := fmt.Sprintf("tolower(displayName) eq '%s'", strings.ToLower(folderName))
 	requestConfiguration := &users.ItemMailFoldersRequestBuilderGetRequestConfiguration{
 		QueryParameters: &users.ItemMailFoldersRequestBuilderGetQueryParameters{
 			Filter: &filter,
@@ -187,20 +224,6 @@ func (c *O365Client) GetOrCreateFolderIDByName(ctx context.Context, mailboxName,
 		folderID := *folders.GetValue()[0].GetId()
 		log.WithField("folderName", folderName).Info("Found existing folder.")
 		return folderID, nil
-	}
-
-	// If folder is not found by exact match, try a case-insensitive search on client side
-	allFolders, err := c.GetAllFolders(ctx, mailboxName)
-	if err != nil {
-		return "", fmt.Errorf("could not get all folders for case-insensitive search: %w", err)
-	}
-
-	for _, folder := range allFolders {
-		if strings.EqualFold(*folder.GetDisplayName(), folderName) {
-			folderID := *folder.GetId()
-			log.WithField("folderName", folderName).Info("Found existing folder (case-insensitive).")
-			return folderID, nil
-		}
 	}
 
 	log.WithField("folderName", folderName).Info("Folder not found, creating it.")

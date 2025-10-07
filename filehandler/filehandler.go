@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"hash/fnv"
 	"regexp"
 	"strings"
 	"sync"
@@ -23,7 +24,10 @@ import (
 	"o365mbx/o365client"
 )
 
-const maxPathLength = 512 // A safe limit for total path length to avoid filesystem errors.
+const (
+	maxPathLength = 512 // A safe limit for total path length to avoid filesystem errors.
+	mutexPoolSize = 256 // A fixed-size pool of mutexes to avoid unbounded memory growth.
+)
 
 // isPathTooLong checks if a given path exceeds the maximum allowed length.
 func isPathTooLong(path string) bool {
@@ -49,6 +53,12 @@ type EmailAddress struct {
 	Address string `json:"address"`
 }
 
+// DownloadState represents the persisted state of an attachment download process for a single message.
+type DownloadState struct {
+	ExpectedAttachments  int                  `json:"expected_attachments"`
+	CompletedAttachments []AttachmentMetadata `json:"completed_attachments"`
+}
+
 // Metadata holds all metadata for a given email message.
 type Metadata struct {
 	To              []Recipient          `json:"to"`
@@ -65,12 +75,14 @@ type Metadata struct {
 type FileHandlerInterface interface {
 	CreateWorkspace() error
 	SaveMessage(message models.Messageable, bodyContent interface{}, convertBody string) (string, error)
-	SaveAttachment(ctx context.Context, msgPath string, att models.Attachmentable, accessToken string, sequence int) (*AttachmentMetadata, error)
 	SaveAttachmentFromBytes(msgPath string, att models.Attachmentable, sequence int) (*AttachmentMetadata, error)
 	SaveAttachmentFromURL(ctx context.Context, msgPath string, att models.Attachmentable, downloadURL string, sequence int) (*AttachmentMetadata, error)
 	WriteAttachmentsToMetadata(msgPath string, attachments []AttachmentMetadata) error
 	SaveState(state *o365client.RunState, stateFilePath string) error
 	LoadState(stateFilePath string) (*o365client.RunState, error)
+	LoadDownloadState(msgPath string) (*DownloadState, bool, error)
+	SaveDownloadState(msgPath string, state *DownloadState) error
+	DeleteDownloadState(msgPath string) error
 }
 
 type FileHandler struct {
@@ -80,8 +92,7 @@ type FileHandler struct {
 	largeAttachmentThreshold int // in bytes
 	chunkSize                int // in bytes
 	bandwidthLimiter         *rate.Limiter
-	fileMutexes              map[string]*sync.Mutex
-	mapMutex                 sync.Mutex
+	mutexPool                []*sync.Mutex
 }
 
 func NewFileHandler(workspacePath string, o365Client o365client.O365ClientInterface, emailProcessor emailprocessor.EmailProcessorInterface, largeAttachmentThresholdMB, chunkSizeMB int, bandwidthLimitMBs float64, logger log.FieldLogger) *FileHandler {
@@ -92,6 +103,11 @@ func NewFileHandler(workspacePath string, o365Client o365client.O365ClientInterf
 		logger.WithField("limit", limit).Info("Bandwidth limiting enabled.")
 	}
 
+	pool := make([]*sync.Mutex, mutexPoolSize)
+	for i := 0; i < mutexPoolSize; i++ {
+		pool[i] = &sync.Mutex{}
+	}
+
 	return &FileHandler{
 		workspacePath:            workspacePath,
 		o365Client:               o365Client,
@@ -99,22 +115,18 @@ func NewFileHandler(workspacePath string, o365Client o365client.O365ClientInterf
 		largeAttachmentThreshold: largeAttachmentThresholdMB * 1024 * 1024,
 		chunkSize:                chunkSizeMB * 1024 * 1024,
 		bandwidthLimiter:         limiter,
-		fileMutexes:              make(map[string]*sync.Mutex),
+		mutexPool:                pool,
 	}
 }
 
-// getMutex returns a mutex for a given file path, creating it if it doesn't exist.
+// getMutex returns a mutex for a given file path by hashing the path
+// to select a mutex from a fixed-size pool. This prevents unbounded memory growth.
 func (fh *FileHandler) getMutex(filePath string) *sync.Mutex {
-	fh.mapMutex.Lock()
-	defer fh.mapMutex.Unlock()
-
-	if mu, ok := fh.fileMutexes[filePath]; ok {
-		return mu
-	}
-
-	mu := &sync.Mutex{}
-	fh.fileMutexes[filePath] = mu
-	return mu
+	hasher := fnv.New32a()
+	_, _ = hasher.Write([]byte(filePath)) // Write never returns an error
+	// Modulo operator ensures the index is within the bounds of the pool.
+	index := hasher.Sum32() % mutexPoolSize
+	return fh.mutexPool[index]
 }
 
 // CreateWorkspace creates the unique workspace directory and verifies it's not a symlink.
@@ -219,20 +231,28 @@ func (fh *FileHandler) SaveMessage(message models.Messageable, bodyContent inter
 	if isPathTooLong(metadataPath) {
 		return "", &apperrors.FileSystemError{Path: metadataPath, Msg: "generated metadata file path exceeds maximum length", Err: nil}
 	}
-	metadataFile, err := os.Create(metadataPath)
+
+	// Use write-and-rename for atomic operation
+	tempMetadataPath := metadataPath + ".tmp"
+	metadataFile, err := os.Create(tempMetadataPath)
 	if err != nil {
-		return "", &apperrors.FileSystemError{Path: metadataPath, Msg: "failed to create metadata file", Err: err}
+		return "", &apperrors.FileSystemError{Path: tempMetadataPath, Msg: "failed to create temporary metadata file", Err: err}
 	}
-	defer func() {
-		if err := metadataFile.Close(); err != nil {
-			log.Warnf("Failed to close metadata file: %v", err)
-		}
-	}()
 
 	encoder := json.NewEncoder(metadataFile)
 	encoder.SetIndent("", "  ")
-	if err := encoder.Encode(metadata); err != nil {
-		return "", fmt.Errorf("failed to encode metadata to JSON: %w", err)
+	encodeErr := encoder.Encode(metadata)
+	closeErr := metadataFile.Close()
+
+	if encodeErr != nil {
+		return "", fmt.Errorf("failed to encode metadata to JSON: %w", encodeErr)
+	}
+	if closeErr != nil {
+		return "", &apperrors.FileSystemError{Path: tempMetadataPath, Msg: "failed to close temporary metadata file", Err: closeErr}
+	}
+
+	if err := os.Rename(tempMetadataPath, metadataPath); err != nil {
+		return "", &apperrors.FileSystemError{Path: tempMetadataPath, Msg: "failed to rename temporary metadata file", Err: err}
 	}
 
 	return msgPath, nil
@@ -255,13 +275,6 @@ func (fh *FileHandler) saveEmailBody(filePath string, bodyContent interface{}) e
 		return &apperrors.FileSystemError{Path: filePath, Msg: "failed to save email body", Err: err}
 	}
 	return nil
-}
-
-// SaveAttachment saves an attachment to a file and returns its metadata.
-func (fh *FileHandler) SaveAttachment(ctx context.Context, msgPath string, att models.Attachmentable, accessToken string, sequence int) (metadata *AttachmentMetadata, err error) {
-	// This function is now a placeholder and will not be used for downloading from URL.
-	// The new approach is to get the attachment content directly.
-	return nil, errors.New("SaveAttachment with download URL is deprecated, use SaveAttachmentFromBytes")
 }
 
 // SaveAttachmentFromBytes saves an attachment from its base64 encoded content and returns its metadata.
@@ -380,20 +393,19 @@ func (fh *FileHandler) WriteAttachmentsToMetadata(msgPath string, attachments []
 
 	metadata.Attachments = attachments
 
-	metadataFile, err := os.Create(metadataPath)
+	// Use write-and-rename for atomic operation
+	updatedData, err := json.MarshalIndent(metadata, "", "  ")
 	if err != nil {
-		return &apperrors.FileSystemError{Path: metadataPath, Msg: "failed to create metadata file for final update", Err: err}
+		return fmt.Errorf("failed to marshal final metadata to JSON: %w", err)
 	}
-	defer func() {
-		if err := metadataFile.Close(); err != nil {
-			log.Warnf("Failed to close metadata file for final update: %v", err)
-		}
-	}()
 
-	encoder := json.NewEncoder(metadataFile)
-	encoder.SetIndent("", "  ")
-	if err := encoder.Encode(metadata); err != nil {
-		return fmt.Errorf("failed to encode final metadata to JSON: %w", err)
+	tempMetadataPath := metadataPath + ".tmp"
+	if err := os.WriteFile(tempMetadataPath, updatedData, 0644); err != nil {
+		return &apperrors.FileSystemError{Path: tempMetadataPath, Msg: "failed to write temporary metadata for final update", Err: err}
+	}
+
+	if err := os.Rename(tempMetadataPath, metadataPath); err != nil {
+		return &apperrors.FileSystemError{Path: tempMetadataPath, Msg: "failed to rename temporary metadata for final update", Err: err}
 	}
 
 	return nil
@@ -486,4 +498,62 @@ func (r *rateLimitedReader) Read(p []byte) (n int, err error) {
 	}
 
 	return n, nil
+}
+
+const downloadStateFileName = ".download_state.json"
+
+// LoadDownloadState loads the attachment download state for a specific message.
+// It returns the state, a boolean indicating if the state file was found, and any error.
+func (fh *FileHandler) LoadDownloadState(msgPath string) (*DownloadState, bool, error) {
+	stateFilePath := filepath.Join(msgPath, downloadStateFileName)
+	content, err := os.ReadFile(stateFilePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, false, nil // State file doesn't exist, not an error.
+		}
+		return nil, false, &apperrors.FileSystemError{Path: stateFilePath, Msg: "failed to read download state file", Err: err}
+	}
+
+	var state DownloadState
+	if err := json.Unmarshal(content, &state); err != nil {
+		return nil, true, fmt.Errorf("failed to unmarshal download state from JSON: %w", err)
+	}
+
+	return &state, true, nil
+}
+
+// SaveDownloadState saves the attachment download state for a specific message.
+func (fh *FileHandler) SaveDownloadState(msgPath string, state *DownloadState) error {
+	stateFilePath := filepath.Join(msgPath, downloadStateFileName)
+	mu := fh.getMutex(stateFilePath)
+	mu.Lock()
+	defer mu.Unlock()
+
+	data, err := json.Marshal(state)
+	if err != nil {
+		return fmt.Errorf("failed to marshal download state to JSON: %w", err)
+	}
+
+	// Write to a temporary file first to ensure atomicity
+	tempFilePath := stateFilePath + ".tmp"
+	if err := os.WriteFile(tempFilePath, data, 0644); err != nil {
+		return &apperrors.FileSystemError{Path: tempFilePath, Msg: "failed to save temporary download state file", Err: err}
+	}
+
+	// Atomically rename the temporary file to the final state file
+	if err := os.Rename(tempFilePath, stateFilePath); err != nil {
+		return &apperrors.FileSystemError{Path: tempFilePath, Msg: "failed to rename temporary download state file", Err: err}
+	}
+
+	return nil
+}
+
+// DeleteDownloadState removes the attachment download state file for a specific message.
+func (fh *FileHandler) DeleteDownloadState(msgPath string) error {
+	stateFilePath := filepath.Join(msgPath, downloadStateFileName)
+	err := os.Remove(stateFilePath)
+	if err != nil && !os.IsNotExist(err) {
+		return &apperrors.FileSystemError{Path: stateFilePath, Msg: "failed to delete download state file", Err: err}
+	}
+	return nil
 }
