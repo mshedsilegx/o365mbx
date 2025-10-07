@@ -117,9 +117,11 @@ func runDownloadMode(ctx context.Context, cfg *Config, o365Client o365client.O36
 		state = &o365client.RunState{}
 	}
 
-	messagesChan := make(chan models.Messageable, cfg.MaxParallelDownloads*2)
-	attachmentsChan := make(chan AttachmentJob, cfg.MaxParallelDownloads*4)
-	resultsChan := make(chan ProcessingResult, cfg.MaxParallelDownloads*4)
+	// We buffer channels to prevent deadlocks and improve throughput.
+	// The buffer sizes are heuristics and can be tuned.
+	messagesChan := make(chan models.Messageable, cfg.MaxParallelProcessors*2)
+	attachmentsChan := make(chan AttachmentJob, cfg.MaxParallelDownloaders*4)
+	resultsChan := make(chan ProcessingResult, (cfg.MaxParallelProcessors+cfg.MaxParallelDownloaders)*2)
 
 	var producerWg, processorWg, downloaderWg, aggregatorWg sync.WaitGroup
 
@@ -128,7 +130,9 @@ func runDownloadMode(ctx context.Context, cfg *Config, o365Client o365client.O36
 		go runAggregator(ctx, cfg, o365Client, resultsChan, &aggregatorWg)
 	}
 
-	semaphore := make(chan struct{}, cfg.MaxParallelDownloads)
+	// Create separate semaphores for processors and downloaders
+	processorSemaphore := make(chan struct{}, cfg.MaxParallelProcessors)
+	downloaderSemaphore := make(chan struct{}, cfg.MaxParallelDownloaders)
 
 	sourceFolderID := cfg.InboxFolder
 	if strings.ToLower(sourceFolderID) != "inbox" {
@@ -151,12 +155,12 @@ func runDownloadMode(ctx context.Context, cfg *Config, o365Client o365client.O36
 		}
 	}()
 
-	for i := 0; i < cfg.MaxParallelDownloads; i++ {
+	for i := 0; i < cfg.MaxParallelProcessors; i++ {
 		processorWg.Add(1)
 		go func() {
 			defer processorWg.Done()
 			for msg := range messagesChan {
-				semaphore <- struct{}{}
+				processorSemaphore <- struct{}{}
 				atomic.AddUint32(&stats.MessagesProcessed, 1)
 				log.WithFields(log.Fields{"messageID": *msg.GetId(), "subject": *msg.GetSubject()}).Infof("Processing message.")
 
@@ -182,7 +186,7 @@ func runDownloadMode(ctx context.Context, cfg *Config, o365Client o365client.O36
 					if cfg.ProcessingMode == "route" {
 						resultsChan <- ProcessingResult{MessageID: *msg.GetId(), Err: finalErr, IsInitialization: true, TotalTasks: 1}
 					}
-					<-semaphore
+					<-processorSemaphore
 					continue
 				}
 
@@ -195,7 +199,7 @@ func runDownloadMode(ctx context.Context, cfg *Config, o365Client o365client.O36
 						if cfg.ProcessingMode == "route" {
 							resultsChan <- ProcessingResult{MessageID: *msg.GetId(), Err: err, IsInitialization: true, TotalTasks: 1}
 						}
-						<-semaphore
+						<-processorSemaphore
 						continue
 					}
 
@@ -230,17 +234,17 @@ func runDownloadMode(ctx context.Context, cfg *Config, o365Client o365client.O36
 					}
 				}
 
-				<-semaphore
+				<-processorSemaphore
 			}
 		}()
 	}
 
-	for i := 0; i < cfg.MaxParallelDownloads; i++ {
+	for i := 0; i < cfg.MaxParallelDownloaders; i++ {
 		downloaderWg.Add(1)
 		go func() {
 			defer downloaderWg.Done()
 			for job := range attachmentsChan {
-				semaphore <- struct{}{}
+				downloaderSemaphore <- struct{}{}
 				log.WithFields(log.Fields{
 					"attachmentName": *job.Attachment.GetName(),
 					"messageID":      job.MessageID,
@@ -294,7 +298,7 @@ func runDownloadMode(ctx context.Context, cfg *Config, o365Client o365client.O36
 				if cfg.ProcessingMode == "route" {
 					resultsChan <- ProcessingResult{MessageID: job.MessageID, Err: err}
 				}
-				<-semaphore
+				<-downloaderSemaphore
 			}
 		}()
 	}

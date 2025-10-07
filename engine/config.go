@@ -30,7 +30,8 @@ type Config struct {
 	HTTPClientTimeoutSeconds int     `json:"httpClientTimeoutSeconds"`
 	MaxRetries               int     `json:"maxRetries"`
 	InitialBackoffSeconds    int     `json:"initialBackoffSeconds"`
-	MaxParallelDownloads     int     `json:"maxParallelDownloads"`
+	MaxParallelProcessors    int     `json:"maxParallelProcessors"`
+	MaxParallelDownloaders   int     `json:"maxParallelDownloaders"`
 	APICallsPerSecond        float64 `json:"apiCallsPerSecond"`
 	APIBurst                 int     `json:"apiBurst"`
 
@@ -64,8 +65,11 @@ func (c *Config) SetDefaults() {
 	if c.ChunkSizeMB == 0 {
 		c.ChunkSizeMB = 8
 	}
-	if c.MaxParallelDownloads == 0 {
-		c.MaxParallelDownloads = 10
+	if c.MaxParallelProcessors == 0 {
+		c.MaxParallelProcessors = 4
+	}
+	if c.MaxParallelDownloaders == 0 {
+		c.MaxParallelDownloaders = 10
 	}
 	if c.APICallsPerSecond == 0 {
 		c.APICallsPerSecond = 5.0 // Default: 5 calls per second
@@ -113,8 +117,11 @@ func (c *Config) Validate() error {
 	if c.ChunkSizeMB <= 0 {
 		return fmt.Errorf("chunkSizeMB must be positive")
 	}
-	if c.MaxParallelDownloads <= 0 {
-		return fmt.Errorf("maxParallelDownloads must be positive")
+	if c.MaxParallelProcessors <= 0 {
+		return fmt.Errorf("maxParallelProcessors must be positive")
+	}
+	if c.MaxParallelDownloaders <= 0 {
+		return fmt.Errorf("maxParallelDownloaders must be positive")
 	}
 	if c.APICallsPerSecond <= 0 {
 		return fmt.Errorf("apiCallsPerSecond must be positive")

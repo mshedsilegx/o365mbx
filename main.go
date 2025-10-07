@@ -49,7 +49,8 @@ func main() {
 	processedFolder := flag.String("processed-folder", "", "Destination folder for successfully processed messages in route mode.")
 	errorFolder := flag.String("error-folder", "", "Destination folder for messages that failed processing in route mode.")
 	timeoutSeconds := flag.Int("timeout", 120, "HTTP client timeout in seconds.")
-	maxParallelDownloads := flag.Int("parallel", 10, "Maximum number of parallel downloads.")
+	parallelProcessors := flag.Int("parallel-processors", 4, "Maximum number of parallel message processors.")
+	parallelDownloaders := flag.Int("parallel-downloads", 10, "Maximum number of parallel attachment downloaders.")
 	apiCallsPerSecond := flag.Float64("api-rate", 5.0, "API calls per second for client-side rate limiting.")
 	apiBurst := flag.Int("api-burst", 10, "API burst capacity for client-side rate limiting.")
 	maxRetries := flag.Int("max-retries", 2, "Maximum number of retries for failed API calls.")
@@ -98,8 +99,10 @@ func main() {
 			cfg.ErrorFolder = *errorFolder
 		case "timeout":
 			cfg.HTTPClientTimeoutSeconds = *timeoutSeconds
-		case "parallel":
-			cfg.MaxParallelDownloads = *maxParallelDownloads
+		case "parallel-processors":
+			cfg.MaxParallelProcessors = *parallelProcessors
+		case "parallel-downloads":
+			cfg.MaxParallelDownloaders = *parallelDownloaders
 		case "api-rate":
 			cfg.APICallsPerSecond = *apiCallsPerSecond
 		case "api-burst":
