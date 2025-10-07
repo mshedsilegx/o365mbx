@@ -346,7 +346,11 @@ func (fh *FileHandler) SaveAttachmentFromURL(ctx context.Context, msgPath string
 	if err != nil {
 		return nil, fmt.Errorf("failed to download attachment from URL %s: %w", downloadURL, err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if closeErr := resp.Body.Close(); closeErr != nil && err == nil {
+			err = fmt.Errorf("failed to close response body for attachment download from %s: %w", downloadURL, closeErr)
+		}
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("failed to download attachment: received status code %d from %s", resp.StatusCode, downloadURL)
