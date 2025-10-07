@@ -342,7 +342,8 @@ func (fh *FileHandler) SaveAttachmentFromURL(ctx context.Context, msgPath string
 
 	var reader io.Reader = resp.Body
 	if fh.bandwidthLimiter != nil {
-		reader = rate.NewReader(reader, fh.bandwidthLimiter)
+		// Pass the request's context to the reader to allow cancellation.
+		reader = &rateLimitedReader{r: resp.Body, limiter: fh.bandwidthLimiter, ctx: ctx}
 	}
 
 	_, err = io.Copy(out, reader)
@@ -458,4 +459,31 @@ func sanitizeFileName(name string) string {
 	}
 
 	return sanitized
+}
+
+// rateLimitedReader wraps an io.Reader and applies a rate.Limiter to it.
+type rateLimitedReader struct {
+	r       io.Reader
+	limiter *rate.Limiter
+	ctx     context.Context
+}
+
+// Read implements the io.Reader interface for rateLimitedReader.
+func (r *rateLimitedReader) Read(p []byte) (n int, err error) {
+	if r.limiter == nil {
+		return r.r.Read(p)
+	}
+
+	n, err = r.r.Read(p)
+	if err != nil {
+		return n, err
+	}
+
+	// Wait for the limiter, respecting context cancellation.
+	if waitErr := r.limiter.WaitN(r.ctx, n); waitErr != nil {
+		// If the context is cancelled, return that error.
+		return n, waitErr
+	}
+
+	return n, nil
 }
