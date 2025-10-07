@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -65,6 +67,7 @@ type FileHandlerInterface interface {
 	SaveMessage(message models.Messageable, bodyContent interface{}, convertBody string) (string, error)
 	SaveAttachment(ctx context.Context, msgPath string, att models.Attachmentable, accessToken string, sequence int) (*AttachmentMetadata, error)
 	SaveAttachmentFromBytes(msgPath string, att models.Attachmentable, sequence int) (*AttachmentMetadata, error)
+	SaveAttachmentFromURL(ctx context.Context, msgPath string, att models.Attachmentable, downloadURL string, sequence int) (*AttachmentMetadata, error)
 	WriteAttachmentsToMetadata(msgPath string, attachments []AttachmentMetadata) error
 	SaveState(state *o365client.RunState, stateFilePath string) error
 	LoadState(stateFilePath string) (*o365client.RunState, error)
@@ -299,6 +302,59 @@ func (fh *FileHandler) SaveAttachmentFromBytes(msgPath string, att models.Attach
 		Name:        *fileAttachment.GetName(),
 		ContentType: *fileAttachment.GetContentType(),
 		Size:        *fileAttachment.GetSize(),
+		SavedAs:     fileName,
+	}
+	return
+}
+
+// SaveAttachmentFromURL saves an attachment by downloading it from a URL and streaming it to a file.
+func (fh *FileHandler) SaveAttachmentFromURL(ctx context.Context, msgPath string, att models.Attachmentable, downloadURL string, sequence int) (metadata *AttachmentMetadata, err error) {
+	fileName := fmt.Sprintf("%02d_%s", sequence, sanitizeFileName(*att.GetName()))
+	filePath := filepath.Join(msgPath, "attachments", fileName)
+	if isPathTooLong(filePath) {
+		return nil, &apperrors.FileSystemError{Path: filePath, Msg: "generated attachment file path exceeds maximum length", Err: nil}
+	}
+
+	out, err := os.Create(filePath)
+	if err != nil {
+		return nil, &apperrors.FileSystemError{Path: filePath, Msg: "failed to create file for attachment from URL", Err: err}
+	}
+	defer func() {
+		if closeErr := out.Close(); closeErr != nil && err == nil {
+			err = &apperrors.FileSystemError{Path: filePath, Msg: "failed to close file after writing attachment from URL", Err: closeErr}
+		}
+	}()
+
+	req, err := http.NewRequestWithContext(ctx, "GET", downloadURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create http request for attachment download: %w", err)
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to download attachment from URL %s: %w", downloadURL, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("failed to download attachment: received status code %d from %s", resp.StatusCode, downloadURL)
+	}
+
+	var reader io.Reader = resp.Body
+	if fh.bandwidthLimiter != nil {
+		reader = rate.NewReader(reader, fh.bandwidthLimiter)
+	}
+
+	_, err = io.Copy(out, reader)
+	if err != nil {
+		return nil, fmt.Errorf("failed to write attachment stream to file for %s: %w", *att.GetName(), err)
+	}
+
+	log.WithField("attachmentName", *att.GetName()).Infof("Successfully saved attachment from URL.")
+	metadata = &AttachmentMetadata{
+		Name:        *att.GetName(),
+		ContentType: *att.GetContentType(),
+		Size:        *att.GetSize(),
 		SavedAs:     fileName,
 	}
 	return

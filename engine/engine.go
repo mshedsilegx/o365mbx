@@ -253,15 +253,27 @@ func runDownloadMode(ctx context.Context, cfg *Config, o365Client o365client.O36
 				var attMetadata *filehandler.AttachmentMetadata
 				var err error
 
+				// Handle small attachments with inline content
 				if fileAttachment, ok := job.Attachment.(*models.FileAttachment); ok && fileAttachment.GetContentBytes() != nil {
+					log.WithField("attachmentName", *job.Attachment.GetName()).Debug("Saving attachment from inline content.")
 					attMetadata, err = fileHandler.SaveAttachmentFromBytes(job.MsgPath, job.Attachment, job.Sequence)
 				} else {
-					// This part of the logic might need adjustment depending on how DownloadURL is exposed in the SDK.
-					// For now, we assume we can get the raw content directly.
-					// The SDK does not directly expose a DownloadURL. We would typically fetch the content.
-					// To simplify, we will assume attachments are fetched with the message.
-					err = fmt.Errorf("attachment is not a file attachment with content bytes, or download from URL is not implemented with SDK")
-					log.WithFields(log.Fields{"attachmentName": *job.Attachment.GetName(), "messageID": job.MessageID}).Warn("Skipping attachment.")
+					// Handle large attachments via download URL
+					additionalData := job.Attachment.GetAdditionalData()
+					downloadURL, exists := additionalData["@microsoft.graph.downloadUrl"]
+					if !exists || downloadURL == nil {
+						err = fmt.Errorf("attachment has no inline content and no download URL")
+						log.WithFields(log.Fields{"attachmentName": *job.Attachment.GetName(), "messageID": job.MessageID}).Warn("Skipping attachment.")
+					} else {
+						downloadURLStr, ok := downloadURL.(*string)
+						if !ok || downloadURLStr == nil || *downloadURLStr == "" {
+							err = fmt.Errorf("attachment has invalid download URL")
+							log.WithFields(log.Fields{"attachmentName": *job.Attachment.GetName(), "messageID": job.MessageID}).Warn("Skipping attachment.")
+						} else {
+							log.WithField("attachmentName", *job.Attachment.GetName()).Debug("Saving attachment from download URL.")
+							attMetadata, err = fileHandler.SaveAttachmentFromURL(ctx, job.MsgPath, job.Attachment, *downloadURLStr, job.Sequence)
+						}
+					}
 				}
 
 				if err != nil {

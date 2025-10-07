@@ -52,6 +52,24 @@ The application employs a sophisticated producer-consumer pattern using Go's gor
 
 *   **Decoupled Semaphores (`chan struct{}`):** The engine uses two separate semaphores to independently control the concurrency of processors and downloaders. This prevents resource contention between the CPU-bound processing tasks and the I/O-bound downloading tasks, allowing for more efficient scaling and better performance. The `processorSemaphore` limits the number of active message processors, while the `downloaderSemaphore` limits the number of concurrent attachment downloads.
 
+## High-Performance Attachment Downloading
+
+To handle attachments of all sizes efficiently, the application uses a two-path download strategy:
+
+1.  **Inlined Content (for Small Attachments):** For small attachments (typically under 4MB), the Microsoft Graph API includes the file content directly in the attachment metadata response as a base64-encoded string (`contentBytes`). The application detects this, decodes the content, and saves it directly. This is highly efficient as it avoids extra HTTP requests.
+
+2.  **Streaming via Download URL (for Large Attachments):** For larger attachments, the API omits the `contentBytes` and instead provides a temporary, pre-authenticated download URL in the attachment's additional data (`@microsoft.graph.downloadUrl`). The application is designed to:
+    *   Request only attachment metadata (ID, name, size, etc.) in the initial API call to ensure the `downloadUrl` is returned for large files.
+    *   Detect the presence of the `downloadUrl`.
+    *   Perform a direct HTTP GET request to this URL.
+    *   Stream the response body directly to a file on disk using `io.Copy`.
+
+This streaming approach provides significant performance and memory benefits:
+*   **Minimal Memory Footprint:** Large files are never fully loaded into memory, allowing the application to download gigabyte-sized attachments with a very small, constant amount of RAM.
+*   **High Throughput:** Data is streamed directly from the network to the disk, which is the most efficient way to handle large file transfers.
+
+This dual strategy ensures that the application uses the most efficient method available for any given attachment size, providing both high performance and robust handling of large mailboxes.
+
 ## Robustness and Error Handling:
 
 The application is designed to be highly resilient against network issues, API limitations, and file system errors.

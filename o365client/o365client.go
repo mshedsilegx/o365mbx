@@ -144,17 +144,27 @@ func (c *O365Client) GetMessages(ctx context.Context, mailboxName, sourceFolderI
 	return nil
 }
 
-// GetMessageAttachments fetches all attachments for a specific message.
+// GetMessageAttachments fetches metadata for all attachments for a specific message.
+// It specifically selects metadata properties and avoids fetching 'contentBytes' to ensure
+// that for large files, the API returns a '@microsoft.graph.downloadUrl' instead.
 func (c *O365Client) GetMessageAttachments(ctx context.Context, mailboxName, messageID string) ([]models.Attachmentable, error) {
 	log.WithFields(log.Fields{"messageID": messageID}).Debug("Fetching attachments for message.")
 
-	response, err := c.client.Users().ByUserId(mailboxName).Messages().ByMessageId(messageID).Attachments().Get(ctx, nil)
+	// Request specific properties to get the downloadUrl for large attachments
+	// and avoid fetching contentBytes for any attachment.
+	requestConfiguration := &users.ItemMessagesItemAttachmentsRequestBuilderGetRequestConfiguration{
+		QueryParameters: &users.ItemMessagesItemAttachmentsRequestBuilderGetQueryParameters{
+			Select: []string{"id", "name", "size", "contentType"},
+		},
+	}
+
+	response, err := c.client.Users().ByUserId(mailboxName).Messages().ByMessageId(messageID).Attachments().Get(ctx, requestConfiguration)
 	if err != nil {
 		return nil, handleError(err)
 	}
 
 	attachments := response.GetValue()
-	log.WithFields(log.Fields{"messageID": messageID, "count": len(attachments)}).Info("Successfully fetched attachments.")
+	log.WithFields(log.Fields{"messageID": messageID, "count": len(attachments)}).Info("Successfully fetched attachments metadata.")
 	return attachments, nil
 }
 
