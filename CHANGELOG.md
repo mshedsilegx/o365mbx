@@ -32,7 +32,7 @@ This change addresses a performance bottleneck that occurred when processing wit
 
 ### New feature: Streaming Download for Large Attachments
 
-This change implements a high-performance, memory-efficient mechanism for downloading large attachments, which were previously skipped.
+This change implements a high-performance, memory-efficient mechanism for downloading large attachments, which were previously chunked with a custom implementation.
 
 - Implemented a dual-path download strategy:
   - Small attachments with inline `contentBytes` are decoded and saved directly.
