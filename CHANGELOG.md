@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2025/10/08 - fix-aggregator-logic]
+
+### Fixed
+- Corrected aggregator logic for resumed downloads in 'route' mode. Messages with attachments that were processed across multiple application runs are now correctly moved from the Inbox.
+
 ## [2025/10/07 - d88addf]
 
 ### Added
