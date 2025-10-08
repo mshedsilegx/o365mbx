@@ -217,7 +217,14 @@ func runDownloadMode(ctx context.Context, cfg *Config, o365Client o365client.O36
 						}
 
 						if cfg.ProcessingMode == "route" {
-							totalTasks := 1 + len(attachments)
+							// Correctly calculate total tasks based on what will actually be processed in this run.
+							attachmentsToDownloadCount := 0
+							for _, att := range attachments {
+								if _, ok := completedAttachments[*att.GetName()]; !ok {
+									attachmentsToDownloadCount++
+								}
+							}
+							totalTasks := 1 + attachmentsToDownloadCount
 							resultsChan <- ProcessingResult{MessageID: *msg.GetId(), Err: processingErr, IsInitialization: true, TotalTasks: totalTasks}
 						}
 
