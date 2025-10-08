@@ -10,6 +10,7 @@ import (
 
 	"o365mbx/apperrors"
 
+	kiotahttp "github.com/microsoft/kiota-http-go"
 	msgraphsdk "github.com/microsoftgraph/msgraph-sdk-go"
 	"github.com/microsoftgraph/msgraph-sdk-go/models"
 	"github.com/microsoftgraph/msgraph-sdk-go/models/odataerrors"
@@ -60,9 +61,29 @@ func NewO365Client(accessToken string, timeout time.Duration, maxRetries int, in
 		return nil, fmt.Errorf("failed to create auth provider: %w", err)
 	}
 
-	adapter, err := msgraphsdk.NewGraphRequestAdapter(authProvider)
+	retryHandler := kiotahttp.NewRetryHandlerWithOptions(kiotahttp.RetryHandlerOptions{
+		MaxRetries:   maxRetries,
+		DelaySeconds: initialBackoffSeconds,
+	})
+
+	middlewareChain := []kiotahttp.Middleware{
+		retryHandler,
+		kiotahttp.NewRedirectHandler(),
+		kiotahttp.NewCompressionHandler(),
+		kiotahttp.NewParametersNameDecodingHandler(),
+		kiotahttp.NewUserAgentHandler(),
+	}
+
+	httpClient := kiotahttp.GetDefaultClient(middlewareChain...)
+	httpClient.Timeout = timeout
+
+	adapter, err := msgraphsdk.NewGraphRequestAdapterWithParseNodeFactoryAndSerializationWriterFactoryAndHttpClient(
+		authProvider,
+		nil, nil,
+		httpClient,
+	)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create graph adapter: %w", err)
+		return nil, fmt.Errorf("failed to create graph adapter with custom client: %w", err)
 	}
 
 	client := msgraphsdk.NewGraphServiceClient(adapter)
@@ -144,23 +165,36 @@ func (c *O365Client) GetMessages(ctx context.Context, mailboxName, sourceFolderI
 	return nil
 }
 
-// GetMessageAttachments fetches all attachments for a specific message.
+// GetMessageAttachments fetches metadata for all attachments for a specific message.
+// It specifically selects metadata properties and avoids fetching 'contentBytes' to ensure
+// that for large files, the API returns a '@microsoft.graph.downloadUrl' instead.
 func (c *O365Client) GetMessageAttachments(ctx context.Context, mailboxName, messageID string) ([]models.Attachmentable, error) {
 	log.WithFields(log.Fields{"messageID": messageID}).Debug("Fetching attachments for message.")
 
-	response, err := c.client.Users().ByUserId(mailboxName).Messages().ByMessageId(messageID).Attachments().Get(ctx, nil)
+	// Request specific properties to get the downloadUrl for large attachments
+	// and avoid fetching contentBytes for any attachment.
+	requestConfiguration := &users.ItemMessagesItemAttachmentsRequestBuilderGetRequestConfiguration{
+		QueryParameters: &users.ItemMessagesItemAttachmentsRequestBuilderGetQueryParameters{
+			Select: []string{"id", "name", "size", "contentType"},
+		},
+	}
+
+	response, err := c.client.Users().ByUserId(mailboxName).Messages().ByMessageId(messageID).Attachments().Get(ctx, requestConfiguration)
 	if err != nil {
 		return nil, handleError(err)
 	}
 
 	attachments := response.GetValue()
-	log.WithFields(log.Fields{"messageID": messageID, "count": len(attachments)}).Info("Successfully fetched attachments.")
+	log.WithFields(log.Fields{"messageID": messageID, "count": len(attachments)}).Info("Successfully fetched attachments metadata.")
 	return attachments, nil
 }
 
 // GetOrCreateFolderIDByName gets the ID of a folder by name, creating it if it doesn't exist.
+// It uses a case-insensitive search for maximum compatibility.
 func (c *O365Client) GetOrCreateFolderIDByName(ctx context.Context, mailboxName, folderName string) (string, error) {
-	filter := fmt.Sprintf("displayName eq '%s'", folderName)
+	// Use a case-insensitive filter by converting the displayName to lower case in the query.
+	// Note the single quotes around the folder name are required by the OData spec.
+	filter := fmt.Sprintf("tolower(displayName) eq '%s'", strings.ToLower(folderName))
 	requestConfiguration := &users.ItemMailFoldersRequestBuilderGetRequestConfiguration{
 		QueryParameters: &users.ItemMailFoldersRequestBuilderGetQueryParameters{
 			Filter: &filter,
@@ -177,20 +211,6 @@ func (c *O365Client) GetOrCreateFolderIDByName(ctx context.Context, mailboxName,
 		folderID := *folders.GetValue()[0].GetId()
 		log.WithField("folderName", folderName).Info("Found existing folder.")
 		return folderID, nil
-	}
-
-	// If folder is not found by exact match, try a case-insensitive search on client side
-	allFolders, err := c.GetAllFolders(ctx, mailboxName)
-	if err != nil {
-		return "", fmt.Errorf("could not get all folders for case-insensitive search: %w", err)
-	}
-
-	for _, folder := range allFolders {
-		if strings.EqualFold(*folder.GetDisplayName(), folderName) {
-			folderID := *folder.GetId()
-			log.WithField("folderName", folderName).Info("Found existing folder (case-insensitive).")
-			return folderID, nil
-		}
 	}
 
 	log.WithField("folderName", folderName).Info("Folder not found, creating it.")
