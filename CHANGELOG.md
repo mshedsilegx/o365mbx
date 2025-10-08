@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [git hash to be populated later]
+## [2025/10/07 - d88addf]
 
 ### Added
 - Resilient attachment download state. The application now creates a temporary `.download_state.json` for each message to track attachment progress, allowing downloads to be resumed safely after an interruption.
@@ -18,7 +18,7 @@ All notable changes to this project will be documented in this file.
 ### Removed
 - Removed a deprecated `SaveAttachment` function and an unused `accessToken` parameter from the engine for better code clarity.
 
-## [git hash to be populated later]
+## [2025/10/06 - c52f094]
 
 ### New feature: Decouple Concurrency Pools
 
