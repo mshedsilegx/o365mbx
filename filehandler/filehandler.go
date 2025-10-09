@@ -3,8 +3,8 @@ package filehandler
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -63,7 +63,7 @@ type Metadata struct {
 type FileHandlerInterface interface {
 	CreateWorkspace() error
 	SaveMessage(message models.Messageable, bodyContent interface{}, convertBody string) (string, error)
-	SaveAttachment(ctx context.Context, msgPath string, att models.Attachmentable, accessToken string, sequence int) (*AttachmentMetadata, error)
+	SaveAttachmentFromStream(msgPath string, att models.Attachmentable, contentStream io.Reader, sequence int) (*AttachmentMetadata, error)
 	SaveAttachmentFromBytes(msgPath string, att models.Attachmentable, sequence int) (*AttachmentMetadata, error)
 	WriteAttachmentsToMetadata(msgPath string, attachments []AttachmentMetadata) error
 	SaveState(state *o365client.RunState, stateFilePath string) error
@@ -254,11 +254,50 @@ func (fh *FileHandler) saveEmailBody(filePath string, bodyContent interface{}) e
 	return nil
 }
 
-// SaveAttachment saves an attachment to a file and returns its metadata.
-func (fh *FileHandler) SaveAttachment(ctx context.Context, msgPath string, att models.Attachmentable, accessToken string, sequence int) (metadata *AttachmentMetadata, err error) {
-	// This function is now a placeholder and will not be used for downloading from URL.
-	// The new approach is to get the attachment content directly.
-	return nil, errors.New("SaveAttachment with download URL is deprecated, use SaveAttachmentFromBytes")
+// SaveAttachmentFromStream saves an attachment from a stream of bytes, which is ideal for large files.
+func (fh *FileHandler) SaveAttachmentFromStream(msgPath string, att models.Attachmentable, contentStream io.Reader, sequence int) (metadata *AttachmentMetadata, err error) {
+	fileName := fmt.Sprintf("%02d_%s", sequence, sanitizeFileName(*att.GetName()))
+
+	// ItemAttachments are saved as .eml files to preserve their MIME content.
+	if _, ok := att.(*models.ItemAttachment); ok {
+		if !strings.HasSuffix(strings.ToLower(fileName), ".eml") {
+			fileName += ".eml"
+		}
+	}
+
+	filePath := filepath.Join(msgPath, "attachments", fileName)
+	if isPathTooLong(filePath) {
+		return nil, &apperrors.FileSystemError{Path: filePath, Msg: "generated attachment file path exceeds maximum length", Err: nil}
+	}
+
+	out, err := os.Create(filePath)
+	if err != nil {
+		return nil, &apperrors.FileSystemError{Path: filePath, Msg: "failed to create file for attachment stream", Err: err}
+	}
+	defer func() {
+		if closeErr := out.Close(); closeErr != nil && err == nil {
+			err = &apperrors.FileSystemError{Path: filePath, Msg: "failed to close file after writing attachment stream", Err: closeErr}
+		}
+	}()
+
+	var reader io.Reader = contentStream
+	if fh.bandwidthLimiter != nil {
+		reader = NewThrottledReader(contentStream, fh.bandwidthLimiter)
+	}
+
+	_, err = io.Copy(out, reader)
+	if err != nil {
+		return nil, fmt.Errorf("failed to write attachment stream to file for %s: %w", *att.GetName(), err)
+	}
+
+	log.WithField("attachmentName", *att.GetName()).Infof("Successfully saved attachment from stream.")
+	metadata = &AttachmentMetadata{
+		Name:        *att.GetName(),
+		ContentType: *att.GetContentType(),
+		Size:        *att.GetSize(),
+		SavedAs:     fileName,
+	}
+	return
 }
 
 // SaveAttachmentFromBytes saves an attachment from its base64 encoded content and returns its metadata.
@@ -402,4 +441,32 @@ func sanitizeFileName(name string) string {
 	}
 
 	return sanitized
+}
+
+// ThrottledReader wraps an io.Reader and limits the read speed.
+type ThrottledReader struct {
+	reader  io.Reader
+	limiter *rate.Limiter
+}
+
+// NewThrottledReader creates a new ThrottledReader.
+func NewThrottledReader(reader io.Reader, limiter *rate.Limiter) *ThrottledReader {
+	return &ThrottledReader{
+		reader:  reader,
+		limiter: limiter,
+	}
+}
+
+// Read reads from the underlying reader, blocking until the limiter allows.
+func (r *ThrottledReader) Read(p []byte) (n int, err error) {
+	n, err = r.reader.Read(p)
+	if err != nil {
+		return n, err
+	}
+
+	if err := r.limiter.WaitN(context.Background(), n); err != nil {
+		return n, err
+	}
+
+	return n, nil
 }

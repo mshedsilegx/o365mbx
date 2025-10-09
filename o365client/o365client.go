@@ -3,6 +3,7 @@ package o365client
 import (
 	"context"
 	"fmt"
+	"io"
 	"math/rand"
 	"sort"
 	"strings"
@@ -10,6 +11,7 @@ import (
 
 	"o365mbx/apperrors"
 
+	abstractions "github.com/microsoft/kiota-abstractions-go"
 	msgraphsdk "github.com/microsoftgraph/msgraph-sdk-go"
 	"github.com/microsoftgraph/msgraph-sdk-go/models"
 	"github.com/microsoftgraph/msgraph-sdk-go/models/odataerrors"
@@ -43,6 +45,7 @@ type MessageDetail struct {
 type O365ClientInterface interface {
 	GetMessages(ctx context.Context, mailboxName, sourceFolderID string, state *RunState, messagesChan chan<- models.Messageable) error
 	GetMessageAttachments(ctx context.Context, mailboxName, messageID string) ([]models.Attachmentable, error)
+	GetAttachmentContent(ctx context.Context, mailboxName, messageID, attachmentID string) (io.ReadCloser, error)
 	GetMailboxHealthCheck(ctx context.Context, mailboxName string) (*MailboxHealthStats, error)
 	GetMessageDetailsForFolder(ctx context.Context, mailboxName, folderName string, detailsChan chan<- MessageDetail) error
 	MoveMessage(ctx context.Context, mailboxName, messageID, destinationFolderID string) error
@@ -148,7 +151,15 @@ func (c *O365Client) GetMessages(ctx context.Context, mailboxName, sourceFolderI
 func (c *O365Client) GetMessageAttachments(ctx context.Context, mailboxName, messageID string) ([]models.Attachmentable, error) {
 	log.WithFields(log.Fields{"messageID": messageID}).Debug("Fetching attachments for message.")
 
-	response, err := c.client.Users().ByUserId(mailboxName).Messages().ByMessageId(messageID).Attachments().Get(ctx, nil)
+	// When fetching attachments, we select only the essential properties to reduce the initial payload size.
+	// The actual content will be downloaded on-demand.
+	requestConfiguration := &users.ItemMessagesItemAttachmentsRequestBuilderGetRequestConfiguration{
+		QueryParameters: &users.ItemMessagesItemAttachmentsRequestBuilderGetQueryParameters{
+			Select: []string{"id", "name", "contentType", "size", "isInline"},
+		},
+	}
+
+	response, err := c.client.Users().ByUserId(mailboxName).Messages().ByMessageId(messageID).Attachments().Get(ctx, requestConfiguration)
 	if err != nil {
 		return nil, handleError(err)
 	}
@@ -156,6 +167,39 @@ func (c *O365Client) GetMessageAttachments(ctx context.Context, mailboxName, mes
 	attachments := response.GetValue()
 	log.WithFields(log.Fields{"messageID": messageID, "count": len(attachments)}).Info("Successfully fetched attachments.")
 	return attachments, nil
+}
+
+// GetAttachmentContent streams the raw content of a single attachment.
+// This is used for downloading large file attachments or the MIME content of item attachments.
+func (c *O365Client) GetAttachmentContent(ctx context.Context, mailboxName, messageID, attachmentID string) (io.ReadCloser, error) {
+	log.WithFields(log.Fields{"messageID": messageID, "attachmentID": attachmentID}).Debug("Requesting attachment content stream.")
+
+	// The Go SDK does not have a fluent method for /$value on attachments.
+	// We must construct the request URL manually and use the core request adapter to execute it.
+	// This approach ensures that we get a stream (io.ReadCloser) back instead of the full content in memory.
+	requestAdapter := c.client.GetAdapter()
+	requestInfo := abstractions.NewRequestInformation()
+	requestInfo.Method = abstractions.GET
+	requestInfo.UrlTemplate = requestAdapter.GetBaseUrl() + "/users/{user-id}/messages/{message-id}/attachments/{attachment-id}/$value"
+
+	// Set the path parameters
+	pathParameters := requestInfo.PathParameters
+	pathParameters["user-id"] = mailboxName
+	pathParameters["message-id"] = messageID
+	pathParameters["attachment-id"] = attachmentID
+
+	// Execute the request and return the stream.
+	// The error mapping is set to nil because we will handle the error after the call.
+	response, err := requestAdapter.SendPrimitive(ctx, requestInfo, "io.ReadCloser", nil)
+	if err != nil {
+		return nil, handleError(fmt.Errorf("failed to get attachment content stream: %w", err))
+	}
+
+	if response == nil {
+		return nil, fmt.Errorf("received nil response for attachment content stream")
+	}
+
+	return response.(io.ReadCloser), nil
 }
 
 // GetOrCreateFolderIDByName gets the ID of a folder by name, creating it if it doesn't exist.

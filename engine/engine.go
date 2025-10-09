@@ -249,21 +249,54 @@ func runDownloadMode(ctx context.Context, cfg *Config, o365Client o365client.O36
 				var attMetadata *filehandler.AttachmentMetadata
 				var err error
 
-				if fileAttachment, ok := job.Attachment.(*models.FileAttachment); ok && fileAttachment.GetContentBytes() != nil {
-					attMetadata, err = fileHandler.SaveAttachmentFromBytes(job.MsgPath, job.Attachment, job.Sequence)
-				} else {
-					// This part of the logic might need adjustment depending on how DownloadURL is exposed in the SDK.
-					// For now, we assume we can get the raw content directly.
-					// The SDK does not directly expose a DownloadURL. We would typically fetch the content.
-					// To simplify, we will assume attachments are fetched with the message.
-					err = fmt.Errorf("attachment is not a file attachment with content bytes, or download from URL is not implemented with SDK")
-					log.WithFields(log.Fields{"attachmentName": *job.Attachment.GetName(), "messageID": job.MessageID}).Warn("Skipping attachment.")
+				// Determine the attachment type and handle accordingly.
+				switch att := job.Attachment.(type) {
+				case *models.FileAttachment:
+					// If contentBytes are present, it's a small attachment. Save it directly.
+					if att.GetContentBytes() != nil {
+						log.WithFields(log.Fields{"attachmentName": *att.GetName(), "messageID": job.MessageID}).Debug("Saving file attachment from bytes.")
+						attMetadata, err = fileHandler.SaveAttachmentFromBytes(job.MsgPath, att, job.Sequence)
+					} else {
+						// Otherwise, it's a large attachment that needs to be streamed.
+						log.WithFields(log.Fields{"attachmentName": *att.GetName(), "messageID": job.MessageID}).Debug("Streaming large file attachment.")
+						var contentStream io.ReadCloser
+						contentStream, err = o365Client.GetAttachmentContent(ctx, cfg.MailboxName, job.MessageID, *att.GetId())
+						if err == nil {
+							defer contentStream.Close()
+							attMetadata, err = fileHandler.SaveAttachmentFromStream(job.MsgPath, att, contentStream, job.Sequence)
+						}
+					}
+				case *models.ItemAttachment:
+					// Item attachments (like embedded emails) are streamed as MIME content.
+					log.WithFields(log.Fields{"attachmentName": *att.GetName(), "messageID": job.MessageID}).Debug("Streaming item attachment (MIME).")
+					var contentStream io.ReadCloser
+					contentStream, err = o365Client.GetAttachmentContent(ctx, cfg.MailboxName, job.MessageID, *att.GetId())
+					if err == nil {
+						defer contentStream.Close()
+						attMetadata, err = fileHandler.SaveAttachmentFromStream(job.MsgPath, att, contentStream, job.Sequence)
+					}
+				case *models.ReferenceAttachment:
+					// Reference attachments are links to files (e.g., in OneDrive).
+					// We will create a .url file containing the link.
+					log.WithFields(log.Fields{"attachmentName": *att.GetName(), "messageID": job.MessageID}).Debug("Handling reference attachment.")
+					// Since we don't implement a specific handler for this, we log it.
+					// In a real-world scenario, you might create a .url file or follow the link.
+					var sourceURLStr string
+					if sourceURL, ok := att.GetAdditionalData()["sourceUrl"]; ok {
+						if sourceURLVal, ok := sourceURL.(*string); ok {
+							sourceURLStr = *sourceURLVal
+						}
+					}
+					log.WithFields(log.Fields{"attachmentName": *att.GetName(), "sourceUrl": sourceURLStr}).Info("Skipping reference attachment.")
+					err = nil // Not considered a processing error for now.
+				default:
+					err = fmt.Errorf("unhandled attachment type: %T", att)
 				}
 
 				if err != nil {
 					atomic.AddUint32(&stats.NonFatalErrors, 1)
 					log.WithFields(log.Fields{"attachmentName": *job.Attachment.GetName(), "messageID": job.MessageID, "error": err}).Error("Failed to save attachment.")
-				} else {
+				} else if attMetadata != nil { // Only increment if metadata was successfully created
 					atomic.AddUint32(&stats.AttachmentsProcessed, 1)
 				}
 
