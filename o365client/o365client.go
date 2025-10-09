@@ -404,9 +404,19 @@ type RunState struct {
 }
 
 // handleError converts odataerrors.ODataError to a more specific application error.
+// extracting the HTTP status code if available
 func handleError(err error) error {
 	if odataErr, ok := err.(*odataerrors.ODataError); ok {
-		return &apperrors.APIError{StatusCode: 0, Msg: odataErr.Error()}
+		var statusCode int
+		// The ODataError is expected to implement an interface that provides the status code.
+		// We perform a type assertion to safely access it
+		if apierror, ok := err.(interface{ GetResponseStatusCode() int }); ok {
+			statusCode = apierror.GetResponseStatusCode()
+		}
+
+		// The main error message from the API is what we want to show
+		// odataErr.error() provides a good summary
+		return &apperrors.APIError{StatusCode: statusCode, Msg: odataErr.Error()}
 	}
 	return err
 }
