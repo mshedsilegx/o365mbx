@@ -38,9 +38,9 @@ The application employs a sophisticated producer-consumer pattern using Go's gor
 
 *   **Producer (`o365client.GetMessages`):** A single goroutine responsible for fetching messages from the O365 Graph API. It handles pagination and filters messages based on the last run timestamp for incremental processing. Fetched messages are sent to the `messagesChan`.
 
-*   **Processors (Multiple Goroutines):** A pool of goroutines (number controlled by `MaxParallelDownloads`) that read messages from `messagesChan`. Each processor first saves the message body and metadata. Then, if the message `hasAttachments`, it makes a separate API call to fetch the list of attachments for that specific message. It then dispatches individual `AttachmentJob`s to the `attachmentsChan`. This two-phase approach (fetch message, then fetch attachments) improves reliability and reduces memory consumption.
+*   **Processors (Multiple Goroutines):** A pool of goroutines (number controlled by `MaxParallelProcessors`) that read messages from `messagesChan`. Each processor first saves the message body and metadata. Then, if the message `hasAttachments`, it makes a separate API call to fetch the list of attachments for that specific message. It then dispatches individual `AttachmentJob`s to the `attachmentsChan`. This two-phase approach (fetch message, then fetch attachments) improves reliability and reduces memory consumption.
 
-*   **Downloaders (Multiple Goroutines):** Another pool of goroutines that consume `AttachmentJob`s from `attachmentsChan`. Each downloader is responsible for saving the attachment content (which is fetched with the attachment list) to the file system and updating the message's metadata.
+*   **Downloaders (Multiple Goroutines):** A separate pool of goroutines (number controlled by `MaxParallelDownloaders`) that consume `AttachmentJob`s from `attachmentsChan`. Each downloader is responsible for saving the attachment content (which is fetched with the attachment list) to the file system and updating the message's metadata.
 
 *   **Aggregator (Single Goroutine, in "route" mode only):** A dedicated goroutine that receives `ProcessingResult`s from both processors and downloaders via `resultsChan`. It tracks the completion status of each message (ensuring both body and all attachments are processed). Once a message is fully processed, the aggregator moves the original message in O365 to either a "Processed" or "Error" folder based on the outcome.
 
@@ -50,7 +50,10 @@ The application employs a sophisticated producer-consumer pattern using Go's gor
 
 *   **`sync.WaitGroup`:** Used to synchronize the completion of all producer, processor, downloader, and aggregator goroutines, ensuring the application exits gracefully only after all tasks are done.
 
-*   **Semaphore (`chan struct{}`):** Implemented as a buffered channel, this mechanism limits the total number of concurrent processor and downloader goroutines actively working, preventing resource exhaustion and allowing fine-grained control over parallelism.
+*   **Semaphores (`chan struct{}`):** The application uses two separate semaphores to independently control the concurrency of the two worker pools:
+    *   `processorSemaphore`: Limits the number of active message processors.
+    *   `downloaderSemaphore`: Limits the number of active attachment downloaders.
+    This separation allows for fine-grained performance tuning, preventing I/O-bound download tasks from being blocked by CPU-bound processing tasks.
 
 ## Robustness and Error Handling:
 
@@ -87,57 +90,62 @@ The application offers flexible configuration options to adapt to various enviro
 
 ## Performance and Parallelism Tuning:
 
-The `MaxParallelDownloads` setting, controlled by the `-parallel` flag or `maxParallelDownloads` in the config file, is central to the application's performance.
+The application's performance is highly tunable through two primary settings that control the concurrency of its decoupled worker pools: `MaxParallelProcessors` and `MaxParallelDownloaders`.
 
-### Definition
-The `parallel` flag in `o365mbx` controls the `MaxParallelDownloads` configuration setting.
+### Decoupled Concurrency Model
+The application separates CPU-bound tasks (message processing, body conversion) from I/O-bound tasks (downloading attachments), allowing for more granular and effective performance tuning.
 
-### Role of the `-parallel` flag:
-**Concurrency Limit:** It determines the maximum number of concurrent workers (goroutines) that will process messages and download attachments simultaneously.
+*   **`-parallel-processors` (`maxParallelProcessors`):** Controls the number of concurrent goroutines processing messages. These tasks are often CPU-bound, especially when body conversion to text or PDF is enabled.
+*   **`-parallel-downloads` (`maxParallelDownloaders`):** Controls the number of concurrent goroutines downloading attachments. These tasks are almost entirely I/O-bound and are often waiting on network responses.
 
-1.  **Command-line flag:**
+This separation prevents a small number of CPU-intensive processing tasks from blocking a large number of I/O-bound download tasks that could otherwise be running in parallel.
+
+### Configuration
+You can set these values via command-line flags or a JSON configuration file.
+
+1.  **Command-line flags:**
     ```bash
-    ./o365mbx -mailbox "user@example.com" -workspace "/path/to/output" -token-env -parallel 20
+    ./o365mbx \
+        -mailbox "user@example.com" \
+        -workspace "/path/to/output" \
+        -token-env \
+        -parallel-processors 12 \
+        -parallel-downloads 24
     ```
 
 2.  **Configuration file (JSON):**
-    You can include `maxParallelDownloads` in your JSON configuration file.
-
-    Example `config.json` snippet:
     ```json
     {
       "mailboxName": "user@example.com",
       "workspacePath": "/path/to/your/output",
-      "maxParallelDownloads": 15,
-      "apiCallsPerSecond": 4.0
+      "maxParallelProcessors": 12,
+      "maxParallelDownloaders": 24,
+      "apiCallsPerSecond": 10.0
     }
     ```
-    Then, run the application referencing this config file:
-    ```bash
-    ./o365mbx -config "/path/to/your/config.json"
-    ```
 
-### Recommendation:
-*   The default value is 10.
+### Tuning Recommendations:
+*   **Default values:** `processors=8`, `downloaders=4`.
+*   **For mailboxes with many small attachments:** You can significantly increase `-parallel-downloads` (e.g., to `20-30`) to maximize download throughput, while keeping `-parallel-processors` at a moderate level (e.g., `8-12`) that aligns with your machine's CPU cores.
+*   **For mailboxes with large attachments:** A very high `-parallel-downloads` might saturate your network bandwidth. A more moderate number (e.g., `10-15`) might be more effective.
+*   **If using PDF conversion:** The `-parallel-processors` value becomes more critical, as PDF conversion is CPU-intensive. You may want to set this value closer to the number of CPU cores available.
 
 ## How to Adjust to Not Trigger O365 Graph API Throttling:
 
-Adjusting the application's parameters to avoid O365 Graph API throttling requires a holistic approach, considering not just the number of concurrent operations but also the rate at which API requests are made.
-
-Here are the best practices:
+Adjusting the application's parameters to avoid O365 Graph API throttling requires a holistic approach.
 
 1.  **Understand Graph API Throttling:** Microsoft Graph API implements throttling to ensure service health and fair usage. When limits are exceeded, the API returns HTTP 429 (Too Many Requests) responses, often with a `Retry-After` header.
 
-2.  **The Role of `-parallel` in Throttling:** While `-parallel` controls local concurrency, a high value can indirectly lead to more frequent API calls, increasing the risk of throttling if not balanced with rate limiting.
+2.  **The Role of Concurrency in Throttling:** Higher values for `-parallel-processors` and `-parallel-downloads` will lead to more frequent API calls. This increases the risk of throttling if not balanced with client-side rate limiting.
 
 3.  **Key Configuration Flags for Throttling Prevention:**
     *   **`-api-rate` (`apiCallsPerSecond`):** Directly controls the maximum number of API calls per second the client will make. This is the primary mechanism for client-side rate limiting.
-    *   **`-api-burst` (`apiBurst`):** Defines the maximum "burst" of API calls allowed in quick succession before the `-api-rate` limit is strictly enforced. This allows for initial spikes in activity without immediate throttling.
+    *   **`-api-burst` (`apiBurst`):** Defines the maximum "burst" of API calls allowed in quick succession before the `-api-rate` limit is strictly enforced.
     *   **`-max-retries` (`maxRetries`):** Configures how many times the application will retry a failed API request (including 429s and 5xxs).
     *   **`-initial-backoff-seconds` (`initialBackoffSeconds`):** Sets the starting delay for exponential backoff during retries.
 
-    *   **Start Conservatively:** Begin with lower values for `-parallel`, `-api-rate`, and `-api-burst`. The default values (`-parallel 10`, `-api-rate 5.0`, `-api-burst 10`) are a good starting point.
+    *   **Start Conservatively:** Begin with the default values.
     *   **Monitor Logs:** Closely monitor application logs for warnings or errors related to HTTP 429 responses or excessive retries.
-    *   **Iterative Adjustment:** Gradually increase `-parallel`, `-api-rate`, and `-api-burst` while monitoring performance and throttling responses. Find the optimal balance that maximizes download speed without triggering frequent throttling.
+    *   **Iterative Adjustment:** Gradually increase concurrency and rate-limiting settings while monitoring performance and throttling responses to find the optimal balance for your environment.
 
-By systematically adjusting these parameters and closely monitoring the application's behavior and logs, you can find an an optimal balance that maximizes download speed while minimizing the risk of O365 Graph API throttling.
+By systematically adjusting these parameters and closely monitoring the application's behavior, you can find an optimal balance that maximizes download speed while minimizing the risk of O365 Graph API throttling.

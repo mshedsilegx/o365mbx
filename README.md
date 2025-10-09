@@ -179,7 +179,8 @@ All configuration options can be controlled via command-line arguments. Any flag
 | `-convert-body`                 | Conversion mode for email bodies: `none`, `text`, or `pdf`.               | No       | `none`  |
 | `-chromium-path`                | Absolute path to the headless Chromium/Chrome binary (required for `pdf`).| No       |         |
 | **Performance & Limits**        |                                                                           |          |         |
-| `-parallel`                     | Maximum number of parallel workers.                                       | No       | `10`    |
+| `-parallel-processors`          | Maximum number of parallel message processors (CPU-bound).                | No       | `8`     |
+| `-parallel-downloads`           | Maximum number of parallel attachment downloaders (I/O-bound).            | No       | `4`     |
 | `-timeout`                      | HTTP client timeout in seconds.                                           | No       | `120`   |
 | `-api-rate`                     | API calls per second for client-side rate limiting.                       | No       | `5.0`   |
 | `-api-burst`                    | API burst capacity for client-side rate limiting.                         | No       | `10`    |
@@ -211,7 +212,8 @@ For a more permanent setup, you can use a JSON file (e.g., `config.json`) and pa
   "httpClientTimeoutSeconds": 120,
   "maxRetries": 2,
   "initialBackoffSeconds": 5,
-  "maxParallelDownloads": 10,
+  "maxParallelProcessors": 8,
+  "maxParallelDownloaders": 4,
   "apiCallsPerSecond": 5.0,
   "apiBurst": 10,
   "stateSaveInterval": 100,
@@ -246,7 +248,8 @@ For a more permanent setup, you can use a JSON file (e.g., `config.json`) and pa
     *   `httpClientTimeoutSeconds`: (Integer) Timeout in seconds for HTTP requests.
     *   `maxRetries`: (Integer) The maximum number of retries for failed API calls.
     *   `initialBackoffSeconds`: (Integer) The initial backoff in seconds for retries.
-    *   `maxParallelDownloads`: (Integer) The maximum number of concurrent workers.
+    *   `maxParallelProcessors`: (Integer) The maximum number of concurrent message processors.
+    *   `maxParallelDownloaders`: (Integer) The maximum number of concurrent attachment downloaders.
     *   `apiCallsPerSecond`: (Float) The number of API calls allowed per second.
     *   `apiBurst`: (Integer) The burst capacity for the API rate limiter.
     *   `bandwidthLimitMBs`: (Float) The download speed limit in megabytes per second. `0` means disabled.
@@ -295,7 +298,8 @@ This example uses a `config.json` file but overrides the parallelism and rate li
     -config "/path/to/your/config.json" \
     -mailbox "user@example.com" \
     -workspace "/path/to/your/output" \
-    -parallel 20 \
+    -parallel-processors 16 \
+    -parallel-downloads 8 \
     -api-rate 10.0 \
     -api-burst 20
 ```
@@ -335,7 +339,8 @@ This example configures the application for maximum download speed by increasing
     -mailbox "user@example.com" \
     -workspace "/path/to/your/output" \
     -token-file "/path/to/token.txt" \
-    -parallel 30 \
+    -parallel-processors 20 \
+    -parallel-downloads 10 \
     -api-rate 15.0 \
     -api-burst 30
 ```
