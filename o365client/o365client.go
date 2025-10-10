@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"math/rand"
+	"net/url"
 	"sort"
 	"strings"
 	"time"
@@ -174,19 +175,31 @@ func (c *O365Client) GetMessageAttachments(ctx context.Context, mailboxName, mes
 func (c *O365Client) GetAttachmentContent(ctx context.Context, mailboxName, messageID, attachmentID string) (io.ReadCloser, error) {
 	log.WithFields(log.Fields{"messageID": messageID, "attachmentID": attachmentID}).Debug("Requesting attachment content stream.")
 
-	// The Go SDK does not have a fluent method for /$value on attachments.
-	// We must construct the request URL manually and use the core request adapter to execute it.
-	// This approach ensures that we get a stream (io.ReadCloser) back instead of the full content in memory.
+	// The Go SDK does not have a fluent method for /$value on attachments. The templating engine in Kiota
+	// appears to have issues with special characters in path parameters, so we will
+	// build the URL string directly and parse it to avoid the templating mechanism.
 	requestAdapter := c.client.GetAdapter()
+
+	// Manually construct the URL string with properly escaped path parameters.
+	// Note: url.PathEscape does not escape '@', so we use url.QueryEscape for the mailbox.
+	rawURL := fmt.Sprintf(
+		"%s/users/%s/messages/%s/attachments/%s/$value",
+		requestAdapter.GetBaseUrl(),
+		url.QueryEscape(mailboxName),
+		url.PathEscape(messageID),
+		url.PathEscape(attachmentID),
+	)
+
+	// Parse the raw URL to create a URL object.
+	parsedURL, err := url.Parse(rawURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse attachment content URL: %w", err)
+	}
+
+	// Create a new request information object and set the URI directly.
 	requestInfo := abstractions.NewRequestInformation()
 	requestInfo.Method = abstractions.GET
-	requestInfo.UrlTemplate = requestAdapter.GetBaseUrl() + "/users/{user-id}/messages/{message-id}/attachments/{attachment-id}/$value"
-
-	// Set the path parameters
-	pathParameters := requestInfo.PathParameters
-	pathParameters["user-id"] = mailboxName
-	pathParameters["message-id"] = messageID
-	pathParameters["attachment-id"] = attachmentID
+	requestInfo.SetUri(*parsedURL)
 
 	// Execute the request and return the stream.
 	// The error mapping is set to nil because we will handle the error after the call.
