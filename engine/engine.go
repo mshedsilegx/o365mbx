@@ -252,8 +252,11 @@ func runDownloadMode(ctx context.Context, cfg *Config, o365Client o365client.O36
 				// Determine the attachment type and handle accordingly.
 				switch att := job.Attachment.(type) {
 				case *models.FileAttachment:
-					// If contentBytes are present, it's a small attachment. Save it directly.
-					if att.GetContentBytes() != nil {
+					// Skip inline attachments (e.g., signature images)
+					if att.GetIsInline() != nil && *att.GetIsInline() {
+						log.WithFields(log.Fields{"attachmentName": *att.GetName(), "messageID": job.MessageID}).Info("Skipping inline file attachment.")
+					} else if att.GetContentBytes() != nil {
+						// If contentBytes are present, it's a small attachment. Save it directly.
 						log.WithFields(log.Fields{"attachmentName": *att.GetName(), "messageID": job.MessageID}).Debug("Saving file attachment from bytes.")
 						attMetadata, err = fileHandler.SaveAttachmentFromBytes(job.MsgPath, att, job.Sequence)
 					} else {
@@ -279,16 +282,12 @@ func runDownloadMode(ctx context.Context, cfg *Config, o365Client o365client.O36
 					// Reference attachments are links to files (e.g., in OneDrive).
 					// We will create a .url file containing the link.
 					log.WithFields(log.Fields{"attachmentName": *att.GetName(), "messageID": job.MessageID}).Debug("Handling reference attachment.")
-					// Since we don't implement a specific handler for this, we log it.
-					// In a real-world scenario, you might create a .url file or follow the link.
-					var sourceURLStr string
-					if sourceURL, ok := att.GetAdditionalData()["sourceUrl"]; ok {
-						if sourceURLVal, ok := sourceURL.(*string); ok {
-							sourceURLStr = *sourceURLVal
-						}
+					attMetadata, err = fileHandler.SaveURLAttachment(job.MsgPath, att, job.Sequence)
+					if err != nil {
+						log.WithFields(log.Fields{"attachmentName": *att.GetName(), "error": err}).Error("Failed to save .url for reference attachment.")
+					} else {
+						log.WithFields(log.Fields{"attachmentName": *att.GetName()}).Info("Saved .url for reference attachment.")
 					}
-					log.WithFields(log.Fields{"attachmentName": *att.GetName(), "sourceUrl": sourceURLStr}).Info("Skipping reference attachment.")
-					err = nil // Not considered a processing error for now.
 				default:
 					err = fmt.Errorf("unhandled attachment type: %T", att)
 				}

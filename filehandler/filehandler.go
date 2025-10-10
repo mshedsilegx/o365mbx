@@ -65,6 +65,7 @@ type FileHandlerInterface interface {
 	SaveMessage(message models.Messageable, bodyContent interface{}, convertBody string) (string, error)
 	SaveAttachmentFromStream(msgPath string, att models.Attachmentable, contentStream io.Reader, sequence int) (*AttachmentMetadata, error)
 	SaveAttachmentFromBytes(msgPath string, att models.Attachmentable, sequence int) (*AttachmentMetadata, error)
+	SaveURLAttachment(msgPath string, att *models.ReferenceAttachment, sequence int) (*AttachmentMetadata, error)
 	WriteAttachmentsToMetadata(msgPath string, attachments []AttachmentMetadata) error
 	SaveState(state *o365client.RunState, stateFilePath string) error
 	LoadState(stateFilePath string) (*o365client.RunState, error)
@@ -297,6 +298,48 @@ func (fh *FileHandler) SaveAttachmentFromStream(msgPath string, att models.Attac
 		Size:        *att.GetSize(),
 		SavedAs:     fileName,
 	}
+	return
+}
+
+// SaveURLAttachment creates a .url shortcut file for a ReferenceAttachment.
+func (fh *FileHandler) SaveURLAttachment(msgPath string, att *models.ReferenceAttachment, sequence int) (metadata *AttachmentMetadata, err error) {
+	var sourceURL string
+	if val, ok := att.GetAdditionalData()["sourceUrl"]; ok {
+		if s, ok := val.(*string); ok {
+			sourceURL = *s
+		}
+	}
+
+	if sourceURL == "" {
+		err = fmt.Errorf("reference attachment has no sourceUrl")
+		return
+	}
+
+	// Construct file name with .url extension
+	fileName := fmt.Sprintf("%02d_%s.url", sequence, sanitizeFileName(*att.GetName()))
+	filePath := filepath.Join(msgPath, "attachments", fileName)
+	if isPathTooLong(filePath) {
+		err = &apperrors.FileSystemError{Path: filePath, Msg: "generated attachment file path exceeds maximum length", Err: nil}
+		return
+	}
+
+	// Create the content for the .url file
+	shortcutContent := fmt.Sprintf("[InternetShortcut]\r\nURL=%s\r\n", sourceURL)
+
+	// Write the content to the file
+	writeErr := os.WriteFile(filePath, []byte(shortcutContent), 0644)
+	if writeErr != nil {
+		err = fmt.Errorf("failed to write .url file: %w", writeErr)
+		return
+	}
+
+	metadata = &AttachmentMetadata{
+		Name:        *att.GetName(),
+		ContentType: *att.GetContentType(),
+		Size:        *att.GetSize(),
+		SavedAs:     fileName,
+	}
+
 	return
 }
 
