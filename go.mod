@@ -7,7 +7,7 @@ toolchain go1.24.3
 require (
 	github.com/go-rod/rod v0.116.2
 	github.com/microsoft/kiota-abstractions-go v1.9.3
-	github.com/microsoftgraph/msgraph-sdk-go v1.87.0
+	github.com/microsoftgraph/msgraph-sdk-go v1.88.0
 	github.com/sirupsen/logrus v1.9.3
 	golang.org/x/net v0.46.0
 	golang.org/x/sys v0.37.0
@@ -27,7 +27,7 @@ require (
 	github.com/microsoft/kiota-serialization-multipart-go v1.1.2 // indirect
 	github.com/microsoft/kiota-serialization-text-go v1.1.3 // indirect
 	github.com/microsoftgraph/msgraph-sdk-go-core v1.4.0 // indirect
-	github.com/std-uritemplate/std-uritemplate/go/v2 v2.0.6 // indirect
+	github.com/std-uritemplate/std-uritemplate/go/v2 v2.0.8 // indirect
 	github.com/ysmood/fetchup v0.5.3 // indirect
 	github.com/ysmood/goob v0.4.0 // indirect
 	github.com/ysmood/got v0.41.0 // indirect
