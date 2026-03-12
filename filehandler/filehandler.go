@@ -363,9 +363,9 @@ func (fh *FileHandler) SaveItemAttachment(ctx context.Context, mailboxName, mess
 		{
 			Name:        attachmentName,
 			ContentType: utils.StringValue(att.GetContentType(), "message/rfc822"),
-	// #nosec G115 - fileInfo.Size() is converted to int32 for metadata. Email attachments are practically much smaller than 2GB.
-			Size:        int32(fileInfo.Size()),
-			SavedAs:     saveName,
+			// #nosec G115 - fileInfo.Size() is converted to int32 for metadata. Email attachments are practically much smaller than 2GB.
+			Size:    int32(fileInfo.Size()),
+			SavedAs: saveName,
 		},
 	}
 
@@ -406,8 +406,8 @@ func (fh *FileHandler) SaveItemAttachment(ctx context.Context, mailboxName, mess
 					Name:        attachmentName + " (body)",
 					ContentType: "text/html",
 					// #nosec G115 - len(bodyContent) is converted to int32 for metadata. Email bodies are practically much smaller than 2GB.
-					Size:        int32(len(bodyContent)),
-					SavedAs:     bodyName,
+					Size:    int32(len(bodyContent)),
+					SavedAs: bodyName,
 				})
 			}
 		}
@@ -445,9 +445,9 @@ func (fh *FileHandler) extractFilesFromEnvelope(env *enmime.Envelope, msgPath st
 		metadatas = append(metadatas, AttachmentMetadata{
 			Name:        fileName,
 			ContentType: part.ContentType,
-		// #nosec G115 - len(part.Content) is converted to int32 for metadata. Email attachments are practically much smaller than 2GB.
-			Size:        int32(len(part.Content)),
-			SavedAs:     safeName,
+			// #nosec G115 - len(part.Content) is converted to int32 for metadata. Email attachments are practically much smaller than 2GB.
+			Size:    int32(len(part.Content)),
+			SavedAs: safeName,
 		})
 	}
 

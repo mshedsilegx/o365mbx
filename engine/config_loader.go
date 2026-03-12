@@ -14,7 +14,7 @@ func LoadConfig(filePath string) (*Config, error) {
 
 	// If a file path is provided, read the file and override the defaults.
 	if filePath != "" {
-	// #nosec G304 - filePath is provided via command-line or internal logic, not direct user input.
+		// #nosec G304 - filePath is provided via command-line or internal logic, not direct user input.
 		data, err := os.ReadFile(filePath)
 		if err != nil {
 			return nil, err
