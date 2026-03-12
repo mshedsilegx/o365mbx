@@ -1,15 +1,21 @@
+// Package o365client handles all interactions with the Microsoft Graph API,
+// including message retrieval, attachment streaming, and mailbox management.
 package o365client
 
 import (
 	"context"
 	"fmt"
+	"io"
 	"math/rand"
+	"net/url"
 	"sort"
 	"strings"
 	"time"
 
 	"o365mbx/apperrors"
+	"o365mbx/utils"
 
+	kiota "github.com/microsoft/kiota-abstractions-go"
 	msgraphsdk "github.com/microsoftgraph/msgraph-sdk-go"
 	"github.com/microsoftgraph/msgraph-sdk-go/models"
 	"github.com/microsoftgraph/msgraph-sdk-go/models/odataerrors"
@@ -17,6 +23,7 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
+// FolderStats encapsulates basic statistics for a specific mail folder.
 type FolderStats struct {
 	Name         string
 	TotalItems   int32
@@ -24,12 +31,14 @@ type FolderStats struct {
 	LastItemDate *time.Time
 }
 
+// MailboxHealthStats provides an overview of the mailbox's health and structure.
 type MailboxHealthStats struct {
 	TotalMessages    int32
 	TotalMailboxSize int64
 	Folders          []FolderStats
 }
 
+// MessageDetail contains granular information about a specific email message.
 type MessageDetail struct {
 	From                 string
 	To                   string
@@ -47,13 +56,16 @@ type O365ClientInterface interface {
 	GetMessageDetailsForFolder(ctx context.Context, mailboxName, folderName string, detailsChan chan<- MessageDetail) error
 	MoveMessage(ctx context.Context, mailboxName, messageID, destinationFolderID string) error
 	GetOrCreateFolderIDByName(ctx context.Context, mailboxName, folderName string) (string, error)
+	GetAttachmentRawStream(ctx context.Context, mailboxName, messageID, attachmentID string) (io.ReadCloser, error)
 }
 
+// O365Client implements the O365ClientInterface using the Microsoft Graph SDK.
 type O365Client struct {
 	client *msgraphsdk.GraphServiceClient
 	rng    *rand.Rand
 }
 
+// NewO365Client initializes a new Graph API client with the provided credentials and settings.
 func NewO365Client(accessToken string, timeout time.Duration, maxRetries int, initialBackoffSeconds int, apiCallsPerSecond float64, apiBurst int, rng *rand.Rand) (*O365Client, error) {
 	authProvider, err := NewStaticTokenAuthenticationProvider(accessToken)
 	if err != nil {
@@ -239,6 +251,7 @@ func (c *O365Client) GetAllFolders(ctx context.Context, mailboxName string) ([]m
 	return allFolders, nil
 }
 
+// GetMailboxHealthCheck retrieves aggregate statistics and folder details for the mailbox.
 func (c *O365Client) GetMailboxHealthCheck(ctx context.Context, mailboxName string) (*MailboxHealthStats, error) {
 	stats := &MailboxHealthStats{
 		Folders: make([]FolderStats, 0),
@@ -356,8 +369,8 @@ func (c *O365Client) GetMessageDetailsForFolder(ctx context.Context, mailboxName
 			detail := MessageDetail{
 				From:                 fromString,
 				To:                   toString,
-				Date:                 *msg.GetReceivedDateTime(),
-				Subject:              *msg.GetSubject(),
+				Date:                 utils.TimeValue(msg.GetReceivedDateTime(), time.Time{}),
+				Subject:              utils.StringValue(msg.GetSubject(), "(no subject)"),
 				AttachmentCount:      attachmentCount,
 				AttachmentsTotalSize: totalAttachmentSize,
 			}
@@ -396,6 +409,47 @@ func (c *O365Client) MoveMessage(ctx context.Context, mailboxName, messageID, de
 		return handleError(err)
 	}
 	return nil
+}
+
+// GetAttachmentRawStream fetches the raw stream of an attachment using the $value endpoint.
+func (c *O365Client) GetAttachmentRawStream(ctx context.Context, mailboxName, messageID, attachmentID string) (io.ReadCloser, error) {
+	log.WithFields(log.Fields{
+		"messageID":    messageID,
+		"attachmentID": attachmentID,
+	}).Debug("Fetching raw attachment stream ($value).")
+
+	// 2. Build the URL string
+	baseUrl := c.client.GetAdapter().GetBaseUrl()
+	urlPathStr := fmt.Sprintf("%s/users/%s/messages/%s/attachments/%s/$value",
+		baseUrl, mailboxName, messageID, attachmentID)
+
+	// 3. PARSE the string into a *url.URL object
+	parsedUrl, err := url.Parse(urlPathStr)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse attachment URL: %w", err)
+	}
+
+	// 4. Construct the Request
+	requestInfo := kiota.NewRequestInformation()
+	requestInfo.Method = kiota.GET
+	requestInfo.SetUri(*parsedUrl) // Pass the dereferenced URL object
+
+	// 5. Send the request via the Adapter
+	response, err := c.client.GetAdapter().SendPrimitive(ctx, requestInfo, "io.ReadCloser", nil)
+	if err != nil {
+		return nil, handleError(err)
+	}
+
+	if response == nil {
+		return nil, fmt.Errorf("received empty response from $value endpoint")
+	}
+
+	rawStream, ok := response.(io.ReadCloser)
+	if !ok {
+		return nil, fmt.Errorf("unexpected response type from Graph API: %T", response)
+	}
+
+	return rawStream, nil
 }
 
 // RunState represents the state of the last successful incremental run.

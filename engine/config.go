@@ -5,6 +5,8 @@ import (
 	"os"
 )
 
+// Config holds all configuration parameters for the application, mapping to
+// JSON fields for file-based configuration.
 type Config struct {
 	// Required settings
 	MailboxName   string `json:"mailboxName,omitempty"`
@@ -45,9 +47,12 @@ type Config struct {
 	// Conversion settings
 	ConvertBody  string `json:"convertBody,omitempty"`
 	ChromiumPath string `json:"chromiumPath,omitempty"`
+
+	// ItemAttachment settings
+	MsgHandler string `json:"msgHandler,omitempty"`
 }
 
-// SetDefaults sets default values for the configuration parameters.
+// SetDefaults populates the configuration with sensible default values.
 func (c *Config) SetDefaults() {
 	if c.HTTPClientTimeoutSeconds == 0 {
 		c.HTTPClientTimeoutSeconds = 120
@@ -94,9 +99,13 @@ func (c *Config) SetDefaults() {
 	if c.ConvertBody == "" {
 		c.ConvertBody = "none"
 	}
+	if c.MsgHandler == "" {
+		c.MsgHandler = "raw"
+	}
 }
 
-// Validate checks if the configuration parameters are valid.
+// Validate ensures all configuration parameters are within acceptable ranges
+// and logically consistent.
 func (c *Config) Validate() error {
 	if c.HTTPClientTimeoutSeconds <= 0 {
 		return fmt.Errorf("httpClientTimeoutSeconds must be positive")
@@ -138,6 +147,13 @@ func (c *Config) Validate() error {
 		// valid
 	default:
 		return fmt.Errorf("invalid convertBody value: %s. Must be one of 'none', 'text', or 'pdf'", c.ConvertBody)
+	}
+
+	switch c.MsgHandler {
+	case "raw", "extractor":
+		// valid
+	default:
+		return fmt.Errorf("invalid msgHandler value: %s. Must be one of 'raw' or 'extractor'", c.MsgHandler)
 	}
 
 	if c.ConvertBody == "pdf" {

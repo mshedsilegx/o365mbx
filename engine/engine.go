@@ -1,10 +1,11 @@
+// Package engine implements the core business logic and orchestrates the parallelized
+// email download and processing pipeline.
 package engine
 
 import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/microsoftgraph/msgraph-sdk-go/models"
 	"io"
 	"o365mbx/apperrors"
 	"o365mbx/emailprocessor"
@@ -17,9 +18,14 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/microsoftgraph/msgraph-sdk-go/models"
+
+	"o365mbx/utils"
+
 	log "github.com/sirupsen/logrus"
 )
 
+// AttachmentJob represents a task for the downloader pool to process a single attachment.
 type AttachmentJob struct {
 	Attachment models.Attachmentable
 	MessageID  string
@@ -33,6 +39,8 @@ type RunStats struct {
 	NonFatalErrors       uint32
 }
 
+// ProcessingResult encapsulates the outcome of a processing task (body or attachment)
+// for aggregation and state tracking.
 type ProcessingResult struct {
 	MessageID        string
 	Err              error
@@ -53,6 +61,8 @@ type DownloadState struct {
 	Mu                   sync.Mutex
 }
 
+// RunEngine is the primary entry point for the core processing logic.
+// It sets up the workspace, initializes statistics, and starts the download mode.
 func RunEngine(ctx context.Context, cfg *Config, o365Client o365client.O365ClientInterface, emailProcessor emailprocessor.EmailProcessorInterface, fileHandler filehandler.FileHandlerInterface, accessToken, version string) {
 	stats := &RunStats{}
 	startTime := time.Now()
@@ -83,6 +93,7 @@ func RunEngine(ctx context.Context, cfg *Config, o365Client o365client.O365Clien
 	runDownloadMode(ctx, cfg, o365Client, emailProcessor, fileHandler, accessToken, stats)
 }
 
+// runDownloadMode manages the multi-stage producer-consumer pipeline for messages and attachments.
 func runDownloadMode(ctx context.Context, cfg *Config, o365Client o365client.O365ClientInterface, emailProcessor emailprocessor.EmailProcessorInterface, fileHandler filehandler.FileHandlerInterface, accessToken string, stats *RunStats) {
 	var messageStates sync.Map
 
@@ -117,12 +128,14 @@ func runDownloadMode(ctx context.Context, cfg *Config, o365Client o365client.O36
 		state = &o365client.RunState{}
 	}
 
+	// 1. Initialize Channels for the Producer-Consumer Pipeline
 	messagesChan := make(chan models.Messageable, cfg.MaxParallelDownloads*2)
 	attachmentsChan := make(chan AttachmentJob, cfg.MaxParallelDownloads*4)
 	resultsChan := make(chan ProcessingResult, cfg.MaxParallelDownloads*4)
 
 	var producerWg, processorWg, downloaderWg, aggregatorWg sync.WaitGroup
 
+	// 2. Start Aggregator (Route Mode only) to track message completion
 	if cfg.ProcessingMode == "route" {
 		aggregatorWg.Add(1)
 		go runAggregator(ctx, cfg, o365Client, resultsChan, &aggregatorWg)
@@ -139,6 +152,7 @@ func runDownloadMode(ctx context.Context, cfg *Config, o365Client o365client.O36
 		}
 	}
 
+	// 3. Start Message Producer Goroutine
 	producerWg.Add(1)
 	go func() {
 		defer producerWg.Done()
@@ -151,21 +165,29 @@ func runDownloadMode(ctx context.Context, cfg *Config, o365Client o365client.O36
 		}
 	}()
 
+	// 4. Start Message Processor Workers
 	for i := 0; i < cfg.MaxParallelDownloads; i++ {
 		processorWg.Add(1)
 		go func() {
 			defer processorWg.Done()
 			for msg := range messagesChan {
 				semaphore <- struct{}{}
+				messageID := utils.StringValue(msg.GetId(), "unknown")
+				subject := utils.StringValue(msg.GetSubject(), "(no subject)")
 				atomic.AddUint32(&stats.MessagesProcessed, 1)
-				log.WithFields(log.Fields{"messageID": *msg.GetId(), "subject": *msg.GetSubject()}).Infof("Processing message.")
+				log.WithFields(log.Fields{"messageID": messageID, "subject": subject}).Infof("Processing message.")
 
-				processedBody, processingErr := emailProcessor.ProcessBody(*msg.GetBody().GetContent(), cfg.ConvertBody, cfg.ChromiumPath)
+				var bodyContent string
+				if msg.GetBody() != nil {
+					bodyContent = utils.StringValue(msg.GetBody().GetContent(), "")
+				}
+
+				processedBody, processingErr := emailProcessor.ProcessBody(bodyContent, cfg.ConvertBody, cfg.ChromiumPath)
 				effectiveConvertBody := cfg.ConvertBody
 				if processingErr != nil {
 					atomic.AddUint32(&stats.NonFatalErrors, 1)
-					log.WithFields(log.Fields{"messageID": *msg.GetId(), "error": processingErr}).Warn("Failed to process message body.")
-					processedBody = *msg.GetBody().GetContent() // Fallback to original content
+					log.WithFields(log.Fields{"messageID": messageID, "error": processingErr}).Warn("Failed to process message body.")
+					processedBody = bodyContent // Fallback to original content
 					if cfg.ConvertBody == "pdf" {
 						effectiveConvertBody = "none" // Save with correct extension for the fallback content
 					}
@@ -178,55 +200,55 @@ func runDownloadMode(ctx context.Context, cfg *Config, o365Client o365client.O36
 					if processingErr != nil {
 						finalErr = fmt.Errorf("body processing error: %w; and save error: %w", processingErr, saveErr)
 					}
-					log.WithFields(log.Fields{"messageID": *msg.GetId(), "error": finalErr}).Errorf("Error saving email message.")
+					log.WithFields(log.Fields{"messageID": messageID, "error": finalErr}).Errorf("Error saving email message.")
 					if cfg.ProcessingMode == "route" {
-						resultsChan <- ProcessingResult{MessageID: *msg.GetId(), Err: finalErr, IsInitialization: true, TotalTasks: 1}
+						resultsChan <- ProcessingResult{MessageID: messageID, Err: finalErr, IsInitialization: true, TotalTasks: 1}
 					}
 					<-semaphore
 					continue
 				}
 
 				// --- Attachment Handling (Two-Phase) ---
-				if *msg.GetHasAttachments() {
-					attachments, err := o365Client.GetMessageAttachments(ctx, cfg.MailboxName, *msg.GetId())
+				if utils.BoolValue(msg.GetHasAttachments(), false) {
+					attachments, err := o365Client.GetMessageAttachments(ctx, cfg.MailboxName, messageID)
 					if err != nil {
 						atomic.AddUint32(&stats.NonFatalErrors, 1)
-						log.WithFields(log.Fields{"messageID": *msg.GetId(), "error": err}).Error("Failed to fetch attachments for message.")
+						log.WithFields(log.Fields{"messageID": messageID, "error": err}).Error("Failed to fetch attachments for message.")
 						if cfg.ProcessingMode == "route" {
-							resultsChan <- ProcessingResult{MessageID: *msg.GetId(), Err: err, IsInitialization: true, TotalTasks: 1}
+							resultsChan <- ProcessingResult{MessageID: messageID, Err: err, IsInitialization: true, TotalTasks: 1}
 						}
 						<-semaphore
 						continue
 					}
 
 					if len(attachments) > 0 {
-						log.WithFields(log.Fields{"count": len(attachments), "messageID": *msg.GetId()}).Infof("Found attachments.")
-						messageStates.Store(*msg.GetId(), &DownloadState{
+						log.WithFields(log.Fields{"count": len(attachments), "messageID": messageID}).Infof("Found attachments.")
+						messageStates.Store(messageID, &DownloadState{
 							ExpectedAttachments: len(attachments),
 							Attachments:         make([]filehandler.AttachmentMetadata, 0, len(attachments)),
 						})
 
 						if cfg.ProcessingMode == "route" {
 							totalTasks := 1 + len(attachments)
-							resultsChan <- ProcessingResult{MessageID: *msg.GetId(), Err: processingErr, IsInitialization: true, TotalTasks: totalTasks}
+							resultsChan <- ProcessingResult{MessageID: messageID, Err: processingErr, IsInitialization: true, TotalTasks: totalTasks}
 						}
 
 						for i, att := range attachments {
 							attachmentsChan <- AttachmentJob{
 								Attachment: att,
-								MessageID:  *msg.GetId(),
+								MessageID:  messageID,
 								MsgPath:    msgPath,
 								Sequence:   i + 1,
 							}
 						}
 					} else { // hasAttachments was true, but API returned none.
 						if cfg.ProcessingMode == "route" {
-							resultsChan <- ProcessingResult{MessageID: *msg.GetId(), Err: processingErr, IsInitialization: true, TotalTasks: 1}
+							resultsChan <- ProcessingResult{MessageID: messageID, Err: processingErr, IsInitialization: true, TotalTasks: 1}
 						}
 					}
 				} else { // No attachments.
 					if cfg.ProcessingMode == "route" {
-						resultsChan <- ProcessingResult{MessageID: *msg.GetId(), Err: processingErr, IsInitialization: true, TotalTasks: 1}
+						resultsChan <- ProcessingResult{MessageID: messageID, Err: processingErr, IsInitialization: true, TotalTasks: 1}
 					}
 				}
 
@@ -235,6 +257,7 @@ func runDownloadMode(ctx context.Context, cfg *Config, o365Client o365client.O36
 		}()
 	}
 
+	// 5. Start Attachment Downloader Workers
 	for i := 0; i < cfg.MaxParallelDownloads; i++ {
 		downloaderWg.Add(1)
 		go func() {
@@ -246,19 +269,10 @@ func runDownloadMode(ctx context.Context, cfg *Config, o365Client o365client.O36
 					"messageID":      job.MessageID,
 				}).Debug("Processing attachment.")
 
-				var attMetadata *filehandler.AttachmentMetadata
+				var attMetadatas []filehandler.AttachmentMetadata
 				var err error
 
-				if fileAttachment, ok := job.Attachment.(*models.FileAttachment); ok && fileAttachment.GetContentBytes() != nil {
-					attMetadata, err = fileHandler.SaveAttachmentFromBytes(job.MsgPath, job.Attachment, job.Sequence)
-				} else {
-					// This part of the logic might need adjustment depending on how DownloadURL is exposed in the SDK.
-					// For now, we assume we can get the raw content directly.
-					// The SDK does not directly expose a DownloadURL. We would typically fetch the content.
-					// To simplify, we will assume attachments are fetched with the message.
-					err = fmt.Errorf("attachment is not a file attachment with content bytes, or download from URL is not implemented with SDK")
-					log.WithFields(log.Fields{"attachmentName": *job.Attachment.GetName(), "messageID": job.MessageID}).Warn("Skipping attachment.")
-				}
+				attMetadatas, err = fileHandler.SaveAttachmentFromBytes(ctx, cfg.MailboxName, job.MessageID, job.MsgPath, job.Attachment, job.Sequence)
 
 				if err != nil {
 					atomic.AddUint32(&stats.NonFatalErrors, 1)
@@ -273,7 +287,7 @@ func runDownloadMode(ctx context.Context, cfg *Config, o365Client o365client.O36
 					state.Mu.Lock()
 					state.CompletedAttachments++
 					if err == nil { // Only append metadata on success
-						state.Attachments = append(state.Attachments, *attMetadata)
+						state.Attachments = append(state.Attachments, attMetadatas...)
 					}
 					isLastAttachment := state.CompletedAttachments == state.ExpectedAttachments
 					state.Mu.Unlock()
@@ -319,6 +333,7 @@ func runDownloadMode(ctx context.Context, cfg *Config, o365Client o365client.O36
 	}
 }
 
+// runAggregator tracks the completion of all tasks for a message and moves it in O365.
 func runAggregator(ctx context.Context, cfg *Config, o365Client o365client.O365ClientInterface, resultsChan <-chan ProcessingResult, wg *sync.WaitGroup) {
 	defer wg.Done()
 	log.Info("Aggregator started.")
@@ -395,6 +410,7 @@ func validateWorkspacePath(path string) error {
 		return fmt.Errorf("workspace path %s exists but is not a directory", path)
 	}
 
+	// #nosec G304 - path is validated by validateWorkspacePath before opening.
 	dir, err := os.Open(path)
 	if err != nil {
 		return fmt.Errorf("failed to open workspace directory for checking emptiness: %w", err)

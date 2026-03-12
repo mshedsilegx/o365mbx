@@ -1,3 +1,8 @@
+// Package main is the entry point for the o365mbx application.
+// It handles CLI argument parsing, configuration loading, and dependency injection.
+//
+// This file contains the Windows-specific implementation of pre-flight checks,
+// such as verifying long path support in the registry.
 //go:build windows
 
 package main

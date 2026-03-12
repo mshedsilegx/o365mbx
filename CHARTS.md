@@ -26,6 +26,7 @@ graph TD
 
     subgraph Utils
         AppErrors[apperrors]
+        SafeDeref[utils]
     end
 
     Main -->|Initializes & Configures| Engine
@@ -43,6 +44,11 @@ graph TD
     
     O365Client -->|Returns Errors| AppErrors
     Engine -->|Returns Errors| AppErrors
+    FileHandler -->|Returns Errors| AppErrors
+    
+    O365Client -.->|Uses| SafeDeref
+    Engine -.->|Uses| SafeDeref
+    FileHandler -.->|Uses| SafeDeref
 ```
 
 ## 2. Concurrency Model (Producer-Consumer)
@@ -82,7 +88,11 @@ sequenceDiagram
 
     loop Parallel Downloaders
         W2->>C2: Read AttachmentJob
-        W2->>W2: Save Attachment File
+        W2->>W2: Save Attachment File (File/Item)
+        opt msgHandler == extractor
+            W2->>W2: Parse MIME & Save Body
+            W2->>W2: Save 1-Level Nested Attachments
+        end
         W2->>C3: Send ProcessingResult (Attachment)
     end
 

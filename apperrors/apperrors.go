@@ -1,3 +1,5 @@
+// Package apperrors defines custom error types for structured error handling
+// throughout the application.
 package apperrors
 
 import (
@@ -9,6 +11,7 @@ import (
 var ErrMissingDeltaLink = errors.New("API did not provide a delta link on the final page of an incremental sync")
 
 // APIError represents an error from the O365 Graph API.
+// APIError represents a structured error returned by the Microsoft Graph API.
 type APIError struct {
 	StatusCode int
 	Msg        string
@@ -19,6 +22,7 @@ func (e *APIError) Error() string {
 }
 
 // FileSystemError represents an error related to file system operations.
+// FileSystemError represents an error encountered during local file system operations.
 type FileSystemError struct {
 	Path string
 	Msg  string

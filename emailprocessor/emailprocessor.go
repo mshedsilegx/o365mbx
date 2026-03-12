@@ -1,3 +1,5 @@
+// Package emailprocessor provides utilities for transforming and cleaning email
+// body content, including HTML-to-Text and HTML-to-PDF conversion.
 package emailprocessor
 
 import (
@@ -26,15 +28,17 @@ type EmailProcessorInterface interface {
 	IsHTML(content string) bool
 }
 
+// EmailProcessor handles the transformation logic for email bodies.
 type EmailProcessor struct {
 	logger log.FieldLogger
 }
 
+// NewEmailProcessor initializes a new processor with the provided logger.
 func NewEmailProcessor(logger log.FieldLogger) *EmailProcessor {
 	return &EmailProcessor{logger: logger}
 }
 
-// ProcessBody converts the body of an email to the specified format.
+// ProcessBody converts the body of an email to the specified format (none, text, or pdf).
 func (ep *EmailProcessor) ProcessBody(htmlContent, convertBody, chromiumPath string) (interface{}, error) {
 	switch convertBody {
 	case "none":
@@ -48,7 +52,7 @@ func (ep *EmailProcessor) ProcessBody(htmlContent, convertBody, chromiumPath str
 	}
 }
 
-// ConvertToPDF converts HTML content to PDF using go-rod.
+// ConvertToPDF converts HTML content to a PDF byte slice using a headless Chromium instance.
 func (ep *EmailProcessor) ConvertToPDF(htmlContent, chromiumPath string) ([]byte, error) {
 	l := launcher.New().Bin(chromiumPath)
 	defer l.Cleanup()
@@ -81,7 +85,8 @@ func (ep *EmailProcessor) ConvertToPDF(htmlContent, chromiumPath string) ([]byte
 	return pdfBytes, nil
 }
 
-// CleanHTML converts HTML content to plain text and removes special characters.
+// CleanHTML converts HTML content to a sanitized plain-text string, preserving
+// basic structure and link information.
 func (ep *EmailProcessor) CleanHTML(htmlContent string) (string, error) {
 	doc, err := html.Parse(strings.NewReader(htmlContent))
 	if err != nil {
@@ -125,9 +130,9 @@ func (ep *EmailProcessor) CleanHTML(htmlContent string) (string, error) {
 			}
 
 			if linkText != "" && href != "" {
-				sb.WriteString(fmt.Sprintf(" [%s](%s) ", linkText, href))
+				fmt.Fprintf(&sb, " [%s](%s) ", linkText, href)
 			} else if href != "" { // Should be rare due to the fallback above
-				sb.WriteString(fmt.Sprintf(" %s ", href))
+				fmt.Fprintf(&sb, " %s ", href)
 			}
 			return // Skip processing children as we've handled the link
 		}
@@ -142,7 +147,7 @@ func (ep *EmailProcessor) CleanHTML(htmlContent string) (string, error) {
 				}
 			}
 			if altText != "" {
-				sb.WriteString(fmt.Sprintf(" [Image: %s] ", altText))
+				fmt.Fprintf(&sb, " [Image: %s] ", altText)
 			}
 			return // Skip processing children as we've handled the image
 		}

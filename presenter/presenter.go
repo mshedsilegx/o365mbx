@@ -1,3 +1,5 @@
+// Package presenter provides formatted output and display logic for health checks
+// and message details.
 package presenter
 
 import (
@@ -10,6 +12,7 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
+// RunHealthCheckMode executes a diagnostic run to display mailbox statistics.
 func RunHealthCheckMode(ctx context.Context, client o365client.O365ClientInterface, mailboxName string) {
 	log.WithField("mailbox", mailboxName).Info("Performing health check...")
 	stats, err := client.GetMailboxHealthCheck(ctx, mailboxName)
@@ -48,6 +51,7 @@ func RunHealthCheckMode(ctx context.Context, client o365client.O365ClientInterfa
 	fmt.Println("-------------------------")
 }
 
+// RunMessageDetailsMode streams and displays metadata for all messages in a specific folder.
 func RunMessageDetailsMode(ctx context.Context, client o365client.O365ClientInterface, mailboxName, folderName string) {
 	log.WithFields(log.Fields{
 		"mailbox": mailboxName,

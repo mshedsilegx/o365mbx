@@ -178,6 +178,7 @@ All configuration options can be controlled via command-line arguments. Any flag
 | **Email Body Conversion**       |                                                                           |          |         |
 | `-convert-body`                 | Conversion mode for email bodies: `none`, `text`, or `pdf`.               | No       | `none`  |
 | `-chromium-path`                | Absolute path to the headless Chromium/Chrome binary (required for `pdf`).| No       |         |
+| `-msg-handler`                  | Handler for `.msg`/`.eml` attachments: `raw` or `extractor`.              | No       | `raw`   |
 | **Performance & Limits**        |                                                                           |          |         |
 | `-parallel`                     | Maximum number of parallel workers.                                       | No       | `10`    |
 | `-timeout`                      | HTTP client timeout in seconds.                                           | No       | `120`   |
@@ -217,7 +218,8 @@ For a more permanent setup, you can use a JSON file (e.g., `config.json`) and pa
   "stateSaveInterval": 100,
   "bandwidthLimitMBs": 0.0,
   "largeAttachmentThresholdMB": 20,
-  "chunkSizeMB": 8
+  "chunkSizeMB": 8,
+  "msgHandler": "extractor"
 }
 ```
 
@@ -256,6 +258,10 @@ For a more permanent setup, you can use a JSON file (e.g., `config.json`) and pa
 *   **Email Body Conversion**:
     *   `convertBody`: (String) The conversion mode for email bodies. Can be `none` (no conversion, saves `.html`), `text` (converts to plain text, saves `.txt`), or `pdf` (converts to PDF, saves `.pdf`). Defaults to `none`.
     *   `chromiumPath`: (String) The absolute path to a headless Chromium or Google Chrome binary. This is **required** if `convertBody` is set to `pdf`.
+*   **ItemAttachment Handling**:
+    *   `msgHandler`: (String) Determines how `.msg` and `.eml` attachments (ItemAttachments) are processed.
+        *   `raw` (Default): Downloads the attachment as-is (MIME/EML format).
+        *   `extractor`: Downloads the attachment, extracts the message body (HTML/Text), and extracts exactly one level of nested attachments.
 
 ### A Note on API Permissions
 
@@ -427,6 +433,30 @@ another@sender.org    user@example.com;...    2024-08-01 09:15    Important: Act
 marketing@company.com user@example.com        2024-07-31 16:00    Weekly Newsletter - Check out our new features and updates for this week! 0            15.30
 ... (and so on)
 -------------------------------------------------
+```
+
+### 10. Complex Email Extraction
+
+This example downloads all emails and, for any attached `.msg` or `.eml` files, extracts their body and immediate attachments.
+
+```shell
+./o365mbx \
+    -mailbox "user@example.com" \
+    -workspace "/path/to/your/output" \
+    -token-env \
+    -msg-handler extractor
+```
+
+### 11. Raw Email Download
+
+This example ensures that attached emails are saved as-is without any extraction (default behavior).
+
+```shell
+./o365mbx \
+    -mailbox "user@example.com" \
+    -workspace "/path/to/your/output" \
+    -token-env \
+    -msg-handler raw
 ```
 
 ## License

@@ -1,3 +1,5 @@
+// Package filehandler manages all local file system operations, including
+// workspace creation, message saving, attachment handling, and state persistence.
 package filehandler
 
 import (
@@ -5,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -12,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jhillyerd/enmime"
 	"github.com/microsoftgraph/msgraph-sdk-go/models"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/time/rate"
@@ -19,6 +23,7 @@ import (
 	"o365mbx/apperrors"
 	"o365mbx/emailprocessor"
 	"o365mbx/o365client"
+	"o365mbx/utils"
 )
 
 const maxPathLength = 512 // A safe limit for total path length to avoid filesystem errors.
@@ -29,6 +34,7 @@ func isPathTooLong(path string) bool {
 }
 
 // AttachmentMetadata holds metadata for a single attachment.
+// AttachmentMetadata holds information about a saved attachment for inclusion in metadata.json.
 type AttachmentMetadata struct {
 	Name        string `json:"attachment_name_in_message"`
 	ContentType string `json:"content_type_of_attachment"`
@@ -48,6 +54,7 @@ type EmailAddress struct {
 }
 
 // Metadata holds all metadata for a given email message.
+// Metadata represents the structured JSON format for an email's metadata.json file.
 type Metadata struct {
 	To              []Recipient          `json:"to"`
 	Cc              []Recipient          `json:"cc"`
@@ -64,12 +71,13 @@ type FileHandlerInterface interface {
 	CreateWorkspace() error
 	SaveMessage(message models.Messageable, bodyContent interface{}, convertBody string) (string, error)
 	SaveAttachment(ctx context.Context, msgPath string, att models.Attachmentable, accessToken string, sequence int) (*AttachmentMetadata, error)
-	SaveAttachmentFromBytes(msgPath string, att models.Attachmentable, sequence int) (*AttachmentMetadata, error)
+	SaveAttachmentFromBytes(ctx context.Context, mailboxName, messageID string, msgPath string, att models.Attachmentable, sequence int) ([]AttachmentMetadata, error)
 	WriteAttachmentsToMetadata(msgPath string, attachments []AttachmentMetadata) error
 	SaveState(state *o365client.RunState, stateFilePath string) error
 	LoadState(stateFilePath string) (*o365client.RunState, error)
 }
 
+// FileHandler handles the disk-based storage and retrieval logic for the application.
 type FileHandler struct {
 	workspacePath            string
 	o365Client               o365client.O365ClientInterface
@@ -79,9 +87,10 @@ type FileHandler struct {
 	bandwidthLimiter         *rate.Limiter
 	fileMutexes              map[string]*sync.Mutex
 	mapMutex                 sync.Mutex
+	msgHandler               string
 }
 
-func NewFileHandler(workspacePath string, o365Client o365client.O365ClientInterface, emailProcessor emailprocessor.EmailProcessorInterface, largeAttachmentThresholdMB, chunkSizeMB int, bandwidthLimitMBs float64, logger log.FieldLogger) *FileHandler {
+func NewFileHandler(workspacePath string, o365Client o365client.O365ClientInterface, emailProcessor emailprocessor.EmailProcessorInterface, largeAttachmentThresholdMB, chunkSizeMB int, bandwidthLimitMBs float64, msgHandler string, logger log.FieldLogger) *FileHandler {
 	var limiter *rate.Limiter
 	if bandwidthLimitMBs > 0 {
 		limit := rate.Limit(bandwidthLimitMBs * 1024 * 1024)
@@ -97,6 +106,7 @@ func NewFileHandler(workspacePath string, o365Client o365client.O365ClientInterf
 		chunkSize:                chunkSizeMB * 1024 * 1024,
 		bandwidthLimiter:         limiter,
 		fileMutexes:              make(map[string]*sync.Mutex),
+		msgHandler:               msgHandler,
 	}
 }
 
@@ -116,7 +126,7 @@ func (fh *FileHandler) getMutex(filePath string) *sync.Mutex {
 
 // CreateWorkspace creates the unique workspace directory and verifies it's not a symlink.
 func (fh *FileHandler) CreateWorkspace() error {
-	err := os.MkdirAll(fh.workspacePath, 0755)
+	err := os.MkdirAll(fh.workspacePath, 0700)
 	if err != nil {
 		return &apperrors.FileSystemError{Path: fh.workspacePath, Msg: "failed to create workspace directory", Err: err}
 	}
@@ -145,25 +155,26 @@ func toRecipients(mRecipients []models.Recipientable) []Recipient {
 }
 
 func toRecipient(mRecipient models.Recipientable) Recipient {
-	if mRecipient == nil {
+	if mRecipient == nil || mRecipient.GetEmailAddress() == nil {
 		return Recipient{}
 	}
 	return Recipient{
 		EmailAddress: EmailAddress{
-			Name:    *mRecipient.GetEmailAddress().GetName(),
-			Address: *mRecipient.GetEmailAddress().GetAddress(),
+			Name:    utils.StringValue(mRecipient.GetEmailAddress().GetName(), ""),
+			Address: utils.StringValue(mRecipient.GetEmailAddress().GetAddress(), ""),
 		},
 	}
 }
 
 // SaveMessage creates the directory structure for a message and saves the metadata and body.
 func (fh *FileHandler) SaveMessage(message models.Messageable, bodyContent interface{}, convertBody string) (string, error) {
-	msgPath := filepath.Join(fh.workspacePath, *message.GetId())
+	messageID := utils.StringValue(message.GetId(), "unknown")
+	msgPath := filepath.Join(fh.workspacePath, messageID)
 	if isPathTooLong(msgPath) {
 		return "", &apperrors.FileSystemError{Path: msgPath, Msg: "generated message path exceeds maximum length", Err: nil}
 	}
 	attachmentsPath := filepath.Join(msgPath, "attachments")
-	if err := os.MkdirAll(attachmentsPath, 0755); err != nil {
+	if err := os.MkdirAll(attachmentsPath, 0700); err != nil {
 		return "", &apperrors.FileSystemError{Path: attachmentsPath, Msg: "failed to create attachments directory", Err: err}
 	}
 
@@ -204,8 +215,8 @@ func (fh *FileHandler) SaveMessage(message models.Messageable, bodyContent inter
 		To:              toRecipients(message.GetToRecipients()),
 		Cc:              toRecipients(message.GetCcRecipients()),
 		From:            toRecipient(message.GetFrom()),
-		Subject:         *message.GetSubject(),
-		ReceivedDate:    *message.GetReceivedDateTime(),
+		Subject:         utils.StringValue(message.GetSubject(), "(no subject)"),
+		ReceivedDate:    utils.TimeValue(message.GetReceivedDateTime(), time.Time{}),
 		BodyFile:        bodyFileName,
 		BodyContentType: bodyContentType,
 		AttachmentCount: len(message.GetAttachments()),
@@ -216,6 +227,7 @@ func (fh *FileHandler) SaveMessage(message models.Messageable, bodyContent inter
 	if isPathTooLong(metadataPath) {
 		return "", &apperrors.FileSystemError{Path: metadataPath, Msg: "generated metadata file path exceeds maximum length", Err: nil}
 	}
+	// #nosec G304 - metadataPath is constructed from workspacePath and messageID, not user input.
 	metadataFile, err := os.Create(metadataPath)
 	if err != nil {
 		return "", &apperrors.FileSystemError{Path: metadataPath, Msg: "failed to create metadata file", Err: err}
@@ -247,7 +259,7 @@ func (fh *FileHandler) saveEmailBody(filePath string, bodyContent interface{}) e
 		return fmt.Errorf("unsupported body content type: %T", bodyContent)
 	}
 
-	err := os.WriteFile(filePath, data, 0644)
+	err := os.WriteFile(filePath, data, 0600)
 	if err != nil {
 		return &apperrors.FileSystemError{Path: filePath, Msg: "failed to save email body", Err: err}
 	}
@@ -261,47 +273,185 @@ func (fh *FileHandler) SaveAttachment(ctx context.Context, msgPath string, att m
 	return nil, errors.New("SaveAttachment with download URL is deprecated, use SaveAttachmentFromBytes")
 }
 
-// SaveAttachmentFromBytes saves an attachment from its base64 encoded content and returns its metadata.
-func (fh *FileHandler) SaveAttachmentFromBytes(msgPath string, att models.Attachmentable, sequence int) (metadata *AttachmentMetadata, err error) {
-	fileAttachment, ok := att.(*models.FileAttachment)
-	if !ok {
-		return nil, fmt.Errorf("attachment is not a file attachment")
+// SaveAttachmentFromBytes saves an attachment (File or Item) and returns a list of metadata for it and any nested attachments.
+// SaveAttachmentFromBytes determines the type of attachment and delegates to the appropriate save method.
+func (fh *FileHandler) SaveAttachmentFromBytes(ctx context.Context, mailboxName, messageID string, msgPath string, att models.Attachmentable, sequence int) ([]AttachmentMetadata, error) {
+	if _, ok := att.(*models.FileAttachment); ok {
+		meta, err := fh.saveFileAttachment(msgPath, att, sequence)
+		if err != nil {
+			return nil, err
+		}
+		return []AttachmentMetadata{*meta}, nil
 	}
 
-	fileName := fmt.Sprintf("%02d_%s", sequence, sanitizeFileName(*fileAttachment.GetName()))
+	if _, ok := att.(*models.ItemAttachment); ok {
+		return fh.SaveItemAttachment(ctx, mailboxName, messageID, msgPath, att, sequence)
+	}
+
+	return nil, fmt.Errorf("unsupported attachment type: %T", att)
+}
+
+// saveFileAttachment saves a standard file attachment.
+func (fh *FileHandler) saveFileAttachment(msgPath string, att models.Attachmentable, sequence int) (*AttachmentMetadata, error) {
+	fileAttachment, _ := att.(*models.FileAttachment)
+	fileName := fmt.Sprintf("%02d_%s", sequence, sanitizeFileName(utils.StringValue(fileAttachment.GetName(), "unnamed")))
 	filePath := filepath.Join(msgPath, "attachments", fileName)
 	if isPathTooLong(filePath) {
 		return nil, &apperrors.FileSystemError{Path: filePath, Msg: "generated attachment file path exceeds maximum length", Err: nil}
 	}
 
-	out, err := os.Create(filePath)
+	contentBytes := fileAttachment.GetContentBytes()
+	if contentBytes == nil {
+		return nil, fmt.Errorf("attachment %s has no content bytes", utils.StringValue(fileAttachment.GetName(), "unnamed"))
+	}
+
+	// #nosec G304 - filePath is constructed from msgPath and fileName, not direct user input.
+	err := os.WriteFile(filePath, contentBytes, 0600)
 	if err != nil {
-		return nil, &apperrors.FileSystemError{Path: filePath, Msg: "failed to create file for attachment from bytes", Err: err}
+		return nil, &apperrors.FileSystemError{Path: filePath, Msg: "failed to save file attachment", Err: err}
+	}
+
+	log.WithField("attachmentName", utils.StringValue(fileAttachment.GetName(), "unnamed")).Infof("Successfully saved file attachment.")
+	return &AttachmentMetadata{
+		Name:        utils.StringValue(fileAttachment.GetName(), "unnamed"),
+		ContentType: utils.StringValue(fileAttachment.GetContentType(), "application/octet-stream"),
+		Size:        utils.Int32Value(fileAttachment.GetSize(), 0),
+		SavedAs:     fileName,
+	}, nil
+}
+
+// SaveItemAttachment downloads an ItemAttachment as MIME, saves it, and optionally extracts its nested attachments.
+// SaveItemAttachment handles .msg/.eml attachments by downloading the raw MIME stream
+// and optionally extracting its contents based on the msgHandler configuration.
+func (fh *FileHandler) SaveItemAttachment(ctx context.Context, mailboxName, messageID string, msgPath string, att models.Attachmentable, sequence int) ([]AttachmentMetadata, error) {
+	attachmentID := *att.GetId()
+	attachmentName := utils.StringValue(att.GetName(), "unnamed")
+
+	rawMimeStream, err := fh.o365Client.GetAttachmentRawStream(ctx, mailboxName, messageID, attachmentID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch raw stream for item attachment %s: %w", attachmentName, err)
 	}
 	defer func() {
-		if closeErr := out.Close(); closeErr != nil && err == nil {
-			err = &apperrors.FileSystemError{Path: filePath, Msg: "failed to close file after writing attachment", Err: closeErr}
+		if closeErr := rawMimeStream.Close(); closeErr != nil {
+			log.Warnf("Failed to close raw MIME stream: %v", closeErr)
 		}
 	}()
 
-	contentBytes := fileAttachment.GetContentBytes()
-	if contentBytes == nil {
-		return nil, fmt.Errorf("attachment %s has no content bytes", *fileAttachment.GetName())
+	// 1. Save the original item attachment (the .eml itself)
+	saveName := fmt.Sprintf("%02d_%s", sequence, sanitizeFileName(attachmentName))
+	if !strings.Contains(saveName, ".") {
+		saveName += ".eml"
 	}
+	filePath := filepath.Join(msgPath, "attachments", saveName)
 
-	_, err = out.Write(contentBytes)
+	// #nosec G304 - filePath is constructed from msgPath and saveName, not direct user input.
+	file, err := os.Create(filePath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to decode and save base64 content for attachment %s: %w", *fileAttachment.GetName(), err)
+		return nil, &apperrors.FileSystemError{Path: filePath, Msg: "failed to create item attachment file", Err: err}
 	}
 
-	log.WithField("attachmentName", *fileAttachment.GetName()).Infof("Successfully saved attachment from contentBytes.")
-	metadata = &AttachmentMetadata{
-		Name:        *fileAttachment.GetName(),
-		ContentType: *fileAttachment.GetContentType(),
-		Size:        *fileAttachment.GetSize(),
-		SavedAs:     fileName,
+	_, err = io.Copy(file, rawMimeStream)
+	if closeErr := file.Close(); closeErr != nil {
+		log.Warnf("Failed to close attachment file %s: %v", filePath, closeErr)
 	}
-	return
+	if err != nil {
+		return nil, fmt.Errorf("failed to stream item attachment to disk: %w", err)
+	}
+
+	fileInfo, _ := os.Stat(filePath)
+	allMetadata := []AttachmentMetadata{
+		{
+			Name:        attachmentName,
+			ContentType: utils.StringValue(att.GetContentType(), "message/rfc822"),
+	// #nosec G115 - fileInfo.Size() is converted to int32 for metadata. Email attachments are practically much smaller than 2GB.
+			Size:        int32(fileInfo.Size()),
+			SavedAs:     saveName,
+		},
+	}
+
+	// 2. If extractor mode, parse and extract body + 1 level of attachments
+	if fh.msgHandler == "extractor" {
+		// #nosec G304 - filePath is constructed from msgPath and saveName, not direct user input.
+		savedFile, err := os.Open(filePath)
+		if err != nil {
+			log.WithFields(log.Fields{"path": filePath, "error": err}).Warn("Failed to re-open attachment for extraction.")
+			return allMetadata, nil
+		}
+		defer func() {
+			if closeErr := savedFile.Close(); closeErr != nil {
+				log.Warnf("Failed to close saved file %s: %v", filePath, closeErr)
+			}
+		}()
+
+		env, err := enmime.ReadEnvelope(savedFile)
+		if err != nil {
+			log.WithFields(log.Fields{"attachmentName": attachmentName, "error": err}).Warn("Failed to parse MIME content, skipping extraction.")
+			return allMetadata, nil
+		}
+
+		// Save Body
+		bodyExt := ".html"
+		bodyContent := env.HTML
+		if bodyContent == "" {
+			bodyContent = env.Text
+			bodyExt = ".txt"
+		}
+
+		if bodyContent != "" {
+			bodyName := fmt.Sprintf("%02d_%s_extracted%s", sequence, sanitizeFileName(attachmentName), bodyExt)
+			bodyPath := filepath.Join(msgPath, "attachments", bodyName)
+			// #nosec G304 - bodyPath is constructed from msgPath and bodyName, not direct user input.
+			if err := os.WriteFile(bodyPath, []byte(bodyContent), 0600); err == nil {
+				allMetadata = append(allMetadata, AttachmentMetadata{
+					Name:        attachmentName + " (body)",
+					ContentType: "text/html",
+					// #nosec G115 - len(bodyContent) is converted to int32 for metadata. Email bodies are practically much smaller than 2GB.
+					Size:        int32(len(bodyContent)),
+					SavedAs:     bodyName,
+				})
+			}
+		}
+
+		// Extract 1 level of nested attachments
+		nestedMetas := fh.extractFilesFromEnvelope(env, msgPath, sequence)
+		allMetadata = append(allMetadata, nestedMetas...)
+	}
+
+	return allMetadata, nil
+}
+
+// extractFilesFromEnvelope handles one level of extraction from a parsed MIME envelope.
+func (fh *FileHandler) extractFilesFromEnvelope(env *enmime.Envelope, msgPath string, parentSequence int) []AttachmentMetadata {
+	var metadatas []AttachmentMetadata
+
+	for i, part := range env.Attachments {
+		nestedCount := i + 1
+		fileName := part.FileName
+		if fileName == "" {
+			fileName = fmt.Sprintf("attachment_%d", nestedCount)
+		}
+
+		safeName := fmt.Sprintf("%02d_%d_%s", parentSequence, nestedCount, sanitizeFileName(fileName))
+		filePath := filepath.Join(msgPath, "attachments", safeName)
+
+		log.WithField("nestedName", fileName).Infof("-> Extracting: %s", safeName)
+
+		// #nosec G304 - filePath is constructed from msgPath and safeName, not direct user input.
+		if err := os.WriteFile(filePath, part.Content, 0600); err != nil {
+			log.WithFields(log.Fields{"fileName": fileName, "error": err}).Error("Failed to save nested attachment.")
+			continue
+		}
+
+		metadatas = append(metadatas, AttachmentMetadata{
+			Name:        fileName,
+			ContentType: part.ContentType,
+		// #nosec G115 - len(part.Content) is converted to int32 for metadata. Email attachments are practically much smaller than 2GB.
+			Size:        int32(len(part.Content)),
+			SavedAs:     safeName,
+		})
+	}
+
+	return metadatas
 }
 
 // WriteAttachmentsToMetadata writes the final list of attachments to the metadata.json file.
@@ -311,6 +461,7 @@ func (fh *FileHandler) WriteAttachmentsToMetadata(msgPath string, attachments []
 	mu.Lock()
 	defer mu.Unlock()
 
+	// #nosec G304 - metadataPath is constructed from msgPath and "metadata.json", not direct user input.
 	data, err := os.ReadFile(metadataPath)
 	if err != nil {
 		return &apperrors.FileSystemError{Path: metadataPath, Msg: "failed to read metadata file for final update", Err: err}
@@ -323,6 +474,7 @@ func (fh *FileHandler) WriteAttachmentsToMetadata(msgPath string, attachments []
 
 	metadata.Attachments = attachments
 
+	// #nosec G304 - metadataPath is constructed from msgPath and "metadata.json", not direct user input.
 	metadataFile, err := os.Create(metadataPath)
 	if err != nil {
 		return &apperrors.FileSystemError{Path: metadataPath, Msg: "failed to create metadata file for final update", Err: err}
@@ -352,7 +504,8 @@ func (fh *FileHandler) SaveState(state *o365client.RunState, stateFilePath strin
 	if err != nil {
 		return fmt.Errorf("failed to marshal state to JSON: %w", err)
 	}
-	err = os.WriteFile(stateFilePath, data, 0644)
+	// #nosec G304 - stateFilePath is provided via configuration, not direct user input.
+	err = os.WriteFile(stateFilePath, data, 0600)
 	if err != nil {
 		return &apperrors.FileSystemError{Path: stateFilePath, Msg: "failed to save state file", Err: err}
 	}
@@ -361,6 +514,7 @@ func (fh *FileHandler) SaveState(state *o365client.RunState, stateFilePath strin
 
 // LoadState loads the RunState from the given file path.
 func (fh *FileHandler) LoadState(stateFilePath string) (*o365client.RunState, error) {
+	// #nosec G304 - stateFilePath is provided via configuration, not direct user input.
 	content, err := os.ReadFile(stateFilePath)
 	if err != nil {
 		if os.IsNotExist(err) {

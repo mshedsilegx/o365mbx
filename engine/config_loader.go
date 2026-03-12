@@ -5,7 +5,8 @@ import (
 	"os"
 )
 
-// LoadConfig loads the configuration from a JSON file, applying defaults first.
+// LoadConfig reads a JSON configuration file and merges it with default values.
+// Command-line flags usually take precedence over these values in main.go.
 func LoadConfig(filePath string) (*Config, error) {
 	// Start with a configuration object with default values.
 	config := &Config{}
@@ -13,6 +14,7 @@ func LoadConfig(filePath string) (*Config, error) {
 
 	// If a file path is provided, read the file and override the defaults.
 	if filePath != "" {
+	// #nosec G304 - filePath is provided via command-line or internal logic, not direct user input.
 		data, err := os.ReadFile(filePath)
 		if err != nil {
 			return nil, err

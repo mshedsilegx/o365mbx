@@ -1,3 +1,5 @@
+// Package main is the entry point for the o365mbx application.
+// It handles CLI argument parsing, configuration loading, and dependency injection.
 package main
 
 import (
@@ -26,9 +28,11 @@ func main() {
 	// --- Pre-flight Checks ---
 	checkLongPathSupport()
 
+	// #nosec G404 - math/rand is used for jitter/backoff, not for security-sensitive operations.
 	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
 
 	// --- Flag Definition ---
+	// Define and parse all command-line arguments for configuration.
 	// Note: The -rod flag is not defined here but is handled by the underlying go-rod library.
 	// It is used to pass launch parameters to the headless chrome browser for PDF conversion.
 	// Example: -rod="--proxy-server=127.0.0.1:8080"
@@ -60,6 +64,7 @@ func main() {
 	bandwidthLimitMBs := flag.Float64("bandwidth-limit-mbs", 0, "Bandwidth limit in MB/s for downloads (0 for disabled).")
 	convertBody := flag.String("convert-body", "none", "Convert body to 'text' or 'pdf'. Default is 'none'.")
 	chromiumPath := flag.String("chromium-path", "", "Path to headless chromium binary for PDF conversion.")
+	msgHandler := flag.String("msg-handler", "raw", "Handler for .msg/.eml attachments: 'raw' or 'extractor'.")
 	flag.Parse()
 
 	// --- Configuration Loading ---
@@ -120,6 +125,8 @@ func main() {
 			cfg.ConvertBody = *convertBody
 		case "chromium-path":
 			cfg.ChromiumPath = *chromiumPath
+		case "msg-handler":
+			cfg.MsgHandler = *msgHandler
 		case "healthcheck":
 			cfg.HealthCheck = *healthCheck
 		case "message-details":
@@ -187,15 +194,17 @@ func main() {
 	}
 
 	// --- Dependency Injection ---
+	// Initialize core services and inject them into the engine.
 	logger := log.WithFields(log.Fields{}) // Create a base logger
 	o365Client, err := o365client.NewO365Client(accessToken, time.Duration(cfg.HTTPClientTimeoutSeconds)*time.Second, cfg.MaxRetries, cfg.InitialBackoffSeconds, cfg.APICallsPerSecond, cfg.APIBurst, rng)
 	if err != nil {
 		log.Fatalf("Error creating O365 client: %v", err)
 	}
 	emailProcessor := emailprocessor.NewEmailProcessor(logger)
-	fileHandler := filehandler.NewFileHandler(cfg.WorkspacePath, o365Client, emailProcessor, cfg.LargeAttachmentThresholdMB, cfg.ChunkSizeMB, cfg.BandwidthLimitMBs, logger)
+	fileHandler := filehandler.NewFileHandler(cfg.WorkspacePath, o365Client, emailProcessor, cfg.LargeAttachmentThresholdMB, cfg.ChunkSizeMB, cfg.BandwidthLimitMBs, cfg.MsgHandler, logger)
 
 	// --- Health Check or Main Engine Execution ---
+	// Execute either the diagnostic health check or the primary download engine.
 	if cfg.HealthCheck {
 		if cfg.MessageDetailsFolder != "" {
 			presenter.RunMessageDetailsMode(ctx, o365Client, cfg.MailboxName, cfg.MessageDetailsFolder)
