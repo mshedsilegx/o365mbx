@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"math/rand"
+	"net/http"
 	"net/url"
 	"sort"
 	"strings"
@@ -49,7 +50,10 @@ type MessageDetail struct {
 }
 
 // O365ClientInterface defines the interface for O365Client methods used by other packages.
+//
+//go:generate mockgen -destination=../mocks/mock_o365client.go -package=mocks o365mbx/o365client O365ClientInterface
 type O365ClientInterface interface {
+	GetMailboxStats(ctx context.Context, mailboxName string) (map[string]int32, error)
 	GetMessages(ctx context.Context, mailboxName, sourceFolderID string, state *RunState, messagesChan chan<- models.Messageable) error
 	GetMessageAttachments(ctx context.Context, mailboxName, messageID string) ([]models.Attachmentable, error)
 	GetMailboxHealthCheck(ctx context.Context, mailboxName string) (*MailboxHealthStats, error)
@@ -72,17 +76,37 @@ func NewO365Client(accessToken string, timeout time.Duration, maxRetries int, in
 		return nil, fmt.Errorf("failed to create auth provider: %w", err)
 	}
 
+	// For production, we use the default GraphRequestAdapter which uses the default http.Client
 	adapter, err := msgraphsdk.NewGraphRequestAdapter(authProvider)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create graph adapter: %w", err)
 	}
 
-	client := msgraphsdk.NewGraphServiceClient(adapter)
+	return NewO365ClientWithAdapter(adapter, rng), nil
+}
 
+// NewO365ClientWithAdapter allows injecting a custom adapter for testing (e.g., with httpmock)
+func NewO365ClientWithAdapter(adapter kiota.RequestAdapter, rng *rand.Rand) *O365Client {
 	return &O365Client{
-		client: client,
+		client: msgraphsdk.NewGraphServiceClient(adapter),
 		rng:    rng,
-	}, nil
+	}
+}
+
+// GetMailboxStats returns a map of folder names to their total item counts.
+func (c *O365Client) GetMailboxStats(ctx context.Context, mailboxName string) (map[string]int32, error) {
+	allFolders, err := c.GetAllFolders(ctx, mailboxName)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get all folders for stats: %w", err)
+	}
+
+	stats := make(map[string]int32)
+	for _, folder := range allFolders {
+		if folder.GetDisplayName() != nil && folder.GetTotalItemCount() != nil {
+			stats[*folder.GetDisplayName()] = *folder.GetTotalItemCount()
+		}
+	}
+	return stats, nil
 }
 
 // GetMessages fetches a list of messages for a given mailbox using delta query and streams them to a channel.
@@ -106,6 +130,10 @@ func (c *O365Client) GetMessages(ctx context.Context, mailboxName, sourceFolderI
 				Select: []string{"id", "subject", "receivedDateTime", "body", "hasAttachments", "from", "toRecipients", "ccRecipients"},
 			},
 		}
+		log.WithFields(log.Fields{
+			"mailboxName":    mailboxName,
+			"sourceFolderID": sourceFolderID,
+		}).Debug("Requesting message delta from Graph API.")
 		messagesResponse, err = c.client.Users().ByUserId(mailboxName).MailFolders().ByMailFolderId(sourceFolderID).Messages().Delta().Get(ctx, requestConfiguration)
 	} else {
 		log.WithField("deltaLink", state.DeltaLink).Info("Found delta link. Fetching incremental changes.")
@@ -117,9 +145,20 @@ func (c *O365Client) GetMessages(ctx context.Context, mailboxName, sourceFolderI
 		return handleError(err)
 	}
 
+	if messagesResponse == nil {
+		log.Warn("Received nil response from O365 API for messages.")
+		return nil
+	}
+
 	for {
 		pageMessages := messagesResponse.GetValue()
-		for _, message := range pageMessages {
+		log.WithField("count", len(pageMessages)).Info("Fetched page of messages.")
+		for i, message := range pageMessages {
+			id := "unknown"
+			if message.GetId() != nil {
+				id = *message.GetId()
+			}
+			log.WithFields(log.Fields{"index": i, "id": id}).Debug("Streaming message to channel.")
 			select {
 			case <-ctx.Done():
 				log.Warn("Context cancelled during message streaming.")
@@ -185,7 +224,7 @@ func (c *O365Client) GetOrCreateFolderIDByName(ctx context.Context, mailboxName,
 		return "", handleError(err)
 	}
 
-	if len(folders.GetValue()) > 0 {
+	if folders != nil && folders.GetValue() != nil && len(folders.GetValue()) > 0 {
 		folderID := *folders.GetValue()[0].GetId()
 		log.WithField("folderName", folderName).Info("Found existing folder.")
 		return folderID, nil
@@ -232,9 +271,15 @@ func (c *O365Client) GetAllFolders(ctx context.Context, mailboxName string) ([]m
 		return nil, handleError(err)
 	}
 
+	if foldersResponse == nil {
+		return allFolders, nil
+	}
+
 	for {
 		pageFolders := foldersResponse.GetValue()
-		allFolders = append(allFolders, pageFolders...)
+		if pageFolders != nil {
+			allFolders = append(allFolders, pageFolders...)
+		}
 
 		nextLink := foldersResponse.GetOdataNextLink()
 		if nextLink == nil || *nextLink == "" {
@@ -336,8 +381,7 @@ func (c *O365Client) GetMessageDetailsForFolder(ctx context.Context, mailboxName
 	}
 
 	for {
-		pageMessages := messagesResponse.GetValue()
-		for _, msg := range pageMessages {
+		for _, msg := range messagesResponse.GetValue() {
 			var totalAttachmentSize int64
 			attachmentCount := 0
 			if msg.GetHasAttachments() != nil && *msg.GetHasAttachments() {
@@ -429,27 +473,31 @@ func (c *O365Client) GetAttachmentRawStream(ctx context.Context, mailboxName, me
 		return nil, fmt.Errorf("failed to parse attachment URL: %w", err)
 	}
 
-	// 4. Construct the Request
-	requestInfo := kiota.NewRequestInformation()
-	requestInfo.Method = kiota.GET
-	requestInfo.SetUri(*parsedUrl) // Pass the dereferenced URL object
+	// 4. Send the request via the Adapter or native HTTP
+	// We use native http.Client here because Kiota's SendPrimitive often fails
+	// with "no factory registered" for message/rfc822 or other binary streams
+	// when using the $value endpoint.
+	req, err := http.NewRequestWithContext(ctx, "GET", parsedUrl.String(), nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
 
-	// 5. Send the request via the Adapter
-	response, err := c.client.GetAdapter().SendPrimitive(ctx, requestInfo, "io.ReadCloser", nil)
+	// Use the transport from the adapter if possible, otherwise default
+	httpClient := &http.Client{
+		Transport: http.DefaultTransport,
+	}
+
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return nil, handleError(err)
 	}
 
-	if response == nil {
-		return nil, fmt.Errorf("received empty response from $value endpoint")
+	if resp.StatusCode != http.StatusOK {
+		_ = resp.Body.Close()
+		return nil, fmt.Errorf("graph api returned status %d for $value endpoint", resp.StatusCode)
 	}
 
-	rawStream, ok := response.(io.ReadCloser)
-	if !ok {
-		return nil, fmt.Errorf("unexpected response type from Graph API: %T", response)
-	}
-
-	return rawStream, nil
+	return resp.Body, nil
 }
 
 // RunState represents the state of the last successful incremental run.

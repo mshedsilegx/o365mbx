@@ -19,6 +19,7 @@ It is designed for high-performance, parallelized downloading and is robust and 
 *   **Health Check Mode**: Provides a "health check" mode to verify connectivity and authentication with the O365 mailbox without performing a full download.
 *   **Structured Logging**: Uses `logrus` for structured and informative logging, with a configurable debug level.
 *   **Advanced PDF Conversion Control**: For users converting emails to PDF, the application provides a `-rod` flag. This flag allows passing launch arguments directly to the underlying `go-rod` headless browser instance. For example, to use a proxy, you could pass `-rod="--proxy-server=127.0.0.1:8080"`. This provides fine-grained control over the browser environment used for conversion.
+*   **Comprehensive Error Reporting and Job Tracking**: Generates detailed job-level and message-level JSON reports to facilitate downstream processing and error reconciliation.
 
     > **Security Warning:** The `-rod` flag passes arguments directly to the underlying browser engine. Use this feature with caution and only with trusted arguments to avoid potential command injection vulnerabilities.
 
@@ -55,12 +56,53 @@ The application saves each email into a dedicated folder within the specified wo
     │   ├── 01_quarterly_report.pdf
     │   └── 02_logo.png
     ├── body.html
+    ├── error.json
     └── metadata.json
 ```
 
 *   **`metadata.json`**: A JSON file containing detailed metadata about the email, including sender, recipients, subject, date, and information about the attachments.
 *   **`body.html` / `body.txt` / `body.pdf`**: The body of the email. The extension depends on the original content type or the conversion option specified.
 *   **`attachments/`**: A sub-directory containing all attachments from the email. Each attachment is prefixed with a two-digit sequence number.
+*   **`error.json`**: Created only if errors occur during the processing of this specific message. Contains a list of error details with timestamps.
+
+### Error JSON Example
+
+```json
+[
+  {
+    "timestamp": "2026-03-14T05:30:05Z",
+    "message": "failed to fetch attachments for message: API error (status: 500): Internal Server Error"
+  }
+]
+```
+
+## Job Status Reporting
+
+At the end of each run, `o365mbx` generates a status report at the root of the workspace to facilitate job tracking and downstream automation. This file is named `status_<timestamp>.json`.
+
+### Status Fields
+
+*   **`mailbox`**: The email address of the target mailbox.
+*   **`timestamp`**: The UTC timestamp when the report was generated.
+*   **`source_mailbox_counts`**: A snapshot of item counts for all folders in the mailbox at the start of the job.
+*   **`job_processed_count`**: The number of messages successfully processed during the current run.
+*   **`job_error_count`**: The number of messages that encountered errors and were routed to the error folder.
+
+### Status JSON Example
+
+```json
+{
+  "mailbox": "user@domain.com",
+  "timestamp": "2026-03-14T05:30:00Z",
+  "source_mailbox_counts": {
+    "Inbox": 150,
+    "Processed": 1200,
+    "Error": 15
+  },
+  "job_processed_count": 45,
+  "job_error_count": 2
+}
+```
 
 ## Metadata JSON Specifications
 
@@ -179,6 +221,7 @@ All configuration options can be controlled via command-line arguments. Any flag
 | `-convert-body`                 | Conversion mode for email bodies: `none`, `text`, or `pdf`.               | No       | `none`  |
 | `-chromium-path`                | Absolute path to the headless Chromium/Chrome binary (required for `pdf`).| No       |         |
 | `-msg-handler`                  | Handler for `.msg`/`.eml` attachments: `raw` or `extractor`.              | No       | `raw`   |
+| `-attachment-extraction-l1`    | Level 1 extraction for `.msg`/`.eml`: `default` (attachments only) or `inlines` (attachments + inlines). | No       | `default`|
 | **Performance & Limits**        |                                                                           |          |         |
 | `-parallel`                     | Maximum number of parallel workers.                                       | No       | `10`    |
 | `-timeout`                      | HTTP client timeout in seconds.                                           | No       | `120`   |
@@ -219,7 +262,8 @@ For a more permanent setup, you can use a JSON file (e.g., `config.json`) and pa
   "bandwidthLimitMBs": 0.0,
   "largeAttachmentThresholdMB": 20,
   "chunkSizeMB": 8,
-  "msgHandler": "extractor"
+  "msgHandler": "extractor",
+  "attachmentExtractionL1": "default"
 }
 ```
 
@@ -262,6 +306,9 @@ For a more permanent setup, you can use a JSON file (e.g., `config.json`) and pa
     *   `msgHandler`: (String) Determines how `.msg` and `.eml` attachments (ItemAttachments) are processed.
         *   `raw` (Default): Downloads the attachment as-is (MIME/EML format).
         *   `extractor`: Downloads the attachment, extracts the message body (HTML/Text), and extracts exactly one level of nested attachments.
+    *   `attachmentExtractionL1`: (String) Determines which parts are extracted when `msgHandler` is set to `extractor`.
+        *   `default` (Default): Only extracts standard attachments.
+        *   `inlines`: Extracts both standard attachments and inline parts (e.g., inline images).
 
 ### A Note on API Permissions
 

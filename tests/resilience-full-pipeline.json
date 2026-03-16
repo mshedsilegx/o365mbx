@@ -1,0 +1,2079 @@
+{
+  "mocks": [
+    {
+      "request": {
+        "method": "GET",
+        "url": "https://graph.microsoft.com/v1.0/users/*/mailFolders/*/messages/delta*"
+      },
+      "response": {
+        "headers": [
+          {
+            "value": "application/json; odata.metadata=minimal",
+            "name": "Content-Type"
+          }
+        ],
+        "body": {
+          "value": [
+            {
+              "id": "msg-chaos",
+              "from": {
+                "emailAddress": {
+                  "address": "sender@test.com",
+                  "name": "Sender"
+                }
+              },
+              "toRecipients": [
+                {
+                  "emailAddress": {
+                    "address": "MeganB@M365x214355.onmicrosoft.com"
+                  }
+                }
+              ],
+              "hasAttachments": false,
+              "receivedDateTime": "2024-03-13T10:00:00Z",
+              "body": {
+                "content": "Chaos baseline",
+                "contentType": "text"
+              },
+              "subject": "Chaos Simulation Test"
+            },
+            {
+              "id": "msg-nested",
+              "from": {
+                "emailAddress": {
+                  "address": "sender@test.com",
+                  "name": "Sender"
+                }
+              },
+              "toRecipients": [
+                {
+                  "emailAddress": {
+                    "address": "MeganB@M365x214355.onmicrosoft.com"
+                  }
+                }
+              ],
+              "hasAttachments": true,
+              "receivedDateTime": "2024-03-13T10:00:00Z",
+              "body": {
+                "content": "<html><body>Testing nested recursion.</body></html>",
+                "contentType": "html"
+              },
+              "subject": "Level 1 Recursion Test"
+            },
+            {
+              "id": "msg-massive",
+              "from": {
+                "emailAddress": {
+                  "address": "io@stress.com",
+                  "name": "IO Stress"
+                }
+              },
+              "toRecipients": [
+                {
+                  "emailAddress": {
+                    "address": "MeganB@M365x214355.onmicrosoft.com"
+                  }
+                }
+              ],
+              "hasAttachments": true,
+              "receivedDateTime": "2024-03-13T11:00:00Z",
+              "body": {
+                "content": "105 attachments simulated.",
+                "contentType": "text"
+              },
+              "subject": "Massive Attachment Pressure Test"
+            },
+            {
+              "id": "msg-kitchen-sink",
+              "from": {
+                "emailAddress": {
+                  "address": "stress@test.com",
+                  "name": "Stress Test"
+                }
+              },
+              "toRecipients": [
+                {
+                  "emailAddress": {
+                    "address": "MeganB@M365x214355.onmicrosoft.com"
+                  }
+                }
+              ],
+              "hasAttachments": true,
+              "receivedDateTime": "2024-03-13T12:00:00Z",
+              "body": {
+                "content": "51 mixed attachments pressure test.",
+                "contentType": "text"
+              },
+              "subject": "The Kitchen Sink Message"
+            },
+            {
+              "id": "msg-hi-fi",
+              "from": {
+                "emailAddress": {
+                  "address": "sender@test.com",
+                  "name": "Sender"
+                }
+              },
+              "toRecipients": [
+                {
+                  "emailAddress": {
+                    "address": "MeganB@M365x214355.onmicrosoft.com"
+                  }
+                }
+              ],
+              "hasAttachments": true,
+              "receivedDateTime": "2024-03-13T10:00:00Z",
+              "body": {
+                "content": "<html><body>Testing complex attachment scenarios.</body></html>",
+                "contentType": "html"
+              },
+              "subject": "High-Fidelity Attachment Test"
+            },
+            {
+              "id": "msg-recursive",
+              "from": {
+                "emailAddress": {
+                  "address": "sender@test.com",
+                  "name": "Sender"
+                }
+              },
+              "toRecipients": [
+                {
+                  "emailAddress": {
+                    "address": "MeganB@M365x214355.onmicrosoft.com"
+                  }
+                }
+              ],
+              "hasAttachments": true,
+              "receivedDateTime": "2024-03-13T11:00:00Z",
+              "body": {
+                "content": "<html><body>Main Body</body></html>",
+                "contentType": "html"
+              },
+              "subject": "Recursive MIME Test"
+            },
+            {
+              "id": "msg-concurrency-01",
+              "from": {
+                "emailAddress": {
+                  "address": "stress@test.com",
+                  "name": "Stress Test"
+                }
+              },
+              "toRecipients": [
+                {
+                  "emailAddress": {
+                    "address": "MeganB@M365x214355.onmicrosoft.com"
+                  }
+                }
+              ],
+              "hasAttachments": false,
+              "receivedDateTime": "2024-03-13T12:00:00Z",
+              "body": {
+                "content": "Concurrency message 1",
+                "contentType": "text"
+              },
+              "subject": "Concurrency Pressure Test 1"
+            },
+            {
+              "id": "msg-concurrency-02",
+              "from": {
+                "emailAddress": {
+                  "address": "stress@test.com",
+                  "name": "Stress Test"
+                }
+              },
+              "toRecipients": [
+                {
+                  "emailAddress": {
+                    "address": "MeganB@M365x214355.onmicrosoft.com"
+                  }
+                }
+              ],
+              "hasAttachments": false,
+              "receivedDateTime": "2024-03-13T12:00:00Z",
+              "body": {
+                "content": "Concurrency message 2",
+                "contentType": "text"
+              },
+              "subject": "Concurrency Pressure Test 2"
+            },
+            {
+              "id": "msg-concurrency-03",
+              "from": {
+                "emailAddress": {
+                  "address": "stress@test.com",
+                  "name": "Stress Test"
+                }
+              },
+              "toRecipients": [
+                {
+                  "emailAddress": {
+                    "address": "MeganB@M365x214355.onmicrosoft.com"
+                  }
+                }
+              ],
+              "hasAttachments": false,
+              "receivedDateTime": "2024-03-13T12:00:00Z",
+              "body": {
+                "content": "Concurrency message 3",
+                "contentType": "text"
+              },
+              "subject": "Concurrency Pressure Test 3"
+            },
+            {
+              "id": "msg-concurrency-04",
+              "from": {
+                "emailAddress": {
+                  "address": "stress@test.com",
+                  "name": "Stress Test"
+                }
+              },
+              "toRecipients": [
+                {
+                  "emailAddress": {
+                    "address": "MeganB@M365x214355.onmicrosoft.com"
+                  }
+                }
+              ],
+              "hasAttachments": false,
+              "receivedDateTime": "2024-03-13T12:00:00Z",
+              "body": {
+                "content": "Concurrency message 4",
+                "contentType": "text"
+              },
+              "subject": "Concurrency Pressure Test 4"
+            },
+            {
+              "id": "msg-concurrency-05",
+              "from": {
+                "emailAddress": {
+                  "address": "stress@test.com",
+                  "name": "Stress Test"
+                }
+              },
+              "toRecipients": [
+                {
+                  "emailAddress": {
+                    "address": "MeganB@M365x214355.onmicrosoft.com"
+                  }
+                }
+              ],
+              "hasAttachments": false,
+              "receivedDateTime": "2024-03-13T12:00:00Z",
+              "body": {
+                "content": "Concurrency message 5",
+                "contentType": "text"
+              },
+              "subject": "Concurrency Pressure Test 5"
+            },
+            {
+              "id": "msg-concurrency-06",
+              "from": {
+                "emailAddress": {
+                  "address": "stress@test.com",
+                  "name": "Stress Test"
+                }
+              },
+              "toRecipients": [
+                {
+                  "emailAddress": {
+                    "address": "MeganB@M365x214355.onmicrosoft.com"
+                  }
+                }
+              ],
+              "hasAttachments": false,
+              "receivedDateTime": "2024-03-13T12:00:00Z",
+              "body": {
+                "content": "Concurrency message 6",
+                "contentType": "text"
+              },
+              "subject": "Concurrency Pressure Test 6"
+            },
+            {
+              "id": "msg-concurrency-07",
+              "from": {
+                "emailAddress": {
+                  "address": "stress@test.com",
+                  "name": "Stress Test"
+                }
+              },
+              "toRecipients": [
+                {
+                  "emailAddress": {
+                    "address": "MeganB@M365x214355.onmicrosoft.com"
+                  }
+                }
+              ],
+              "hasAttachments": false,
+              "receivedDateTime": "2024-03-13T12:00:00Z",
+              "body": {
+                "content": "Concurrency message 7",
+                "contentType": "text"
+              },
+              "subject": "Concurrency Pressure Test 7"
+            },
+            {
+              "id": "msg-concurrency-08",
+              "from": {
+                "emailAddress": {
+                  "address": "stress@test.com",
+                  "name": "Stress Test"
+                }
+              },
+              "toRecipients": [
+                {
+                  "emailAddress": {
+                    "address": "MeganB@M365x214355.onmicrosoft.com"
+                  }
+                }
+              ],
+              "hasAttachments": false,
+              "receivedDateTime": "2024-03-13T12:00:00Z",
+              "body": {
+                "content": "Concurrency message 8",
+                "contentType": "text"
+              },
+              "subject": "Concurrency Pressure Test 8"
+            },
+            {
+              "id": "msg-concurrency-09",
+              "from": {
+                "emailAddress": {
+                  "address": "stress@test.com",
+                  "name": "Stress Test"
+                }
+              },
+              "toRecipients": [
+                {
+                  "emailAddress": {
+                    "address": "MeganB@M365x214355.onmicrosoft.com"
+                  }
+                }
+              ],
+              "hasAttachments": false,
+              "receivedDateTime": "2024-03-13T12:00:00Z",
+              "body": {
+                "content": "Concurrency message 9",
+                "contentType": "text"
+              },
+              "subject": "Concurrency Pressure Test 9"
+            },
+            {
+              "id": "msg-concurrency-10",
+              "from": {
+                "emailAddress": {
+                  "address": "stress@test.com",
+                  "name": "Stress Test"
+                }
+              },
+              "toRecipients": [
+                {
+                  "emailAddress": {
+                    "address": "MeganB@M365x214355.onmicrosoft.com"
+                  }
+                }
+              ],
+              "hasAttachments": false,
+              "receivedDateTime": "2024-03-13T12:00:00Z",
+              "body": {
+                "content": "Concurrency message 10",
+                "contentType": "text"
+              },
+              "subject": "Concurrency Pressure Test 10"
+            },
+            {
+              "id": "msg-concurrency-11",
+              "from": {
+                "emailAddress": {
+                  "address": "stress@test.com",
+                  "name": "Stress Test"
+                }
+              },
+              "toRecipients": [
+                {
+                  "emailAddress": {
+                    "address": "MeganB@M365x214355.onmicrosoft.com"
+                  }
+                }
+              ],
+              "hasAttachments": false,
+              "receivedDateTime": "2024-03-13T12:00:00Z",
+              "body": {
+                "content": "Concurrency message 11",
+                "contentType": "text"
+              },
+              "subject": "Concurrency Pressure Test 11"
+            },
+            {
+              "id": "msg-concurrency-12",
+              "from": {
+                "emailAddress": {
+                  "address": "stress@test.com",
+                  "name": "Stress Test"
+                }
+              },
+              "toRecipients": [
+                {
+                  "emailAddress": {
+                    "address": "MeganB@M365x214355.onmicrosoft.com"
+                  }
+                }
+              ],
+              "hasAttachments": false,
+              "receivedDateTime": "2024-03-13T12:00:00Z",
+              "body": {
+                "content": "Concurrency message 12",
+                "contentType": "text"
+              },
+              "subject": "Concurrency Pressure Test 12"
+            },
+            {
+              "id": "msg-concurrency-13",
+              "from": {
+                "emailAddress": {
+                  "address": "stress@test.com",
+                  "name": "Stress Test"
+                }
+              },
+              "toRecipients": [
+                {
+                  "emailAddress": {
+                    "address": "MeganB@M365x214355.onmicrosoft.com"
+                  }
+                }
+              ],
+              "hasAttachments": false,
+              "receivedDateTime": "2024-03-13T12:00:00Z",
+              "body": {
+                "content": "Concurrency message 13",
+                "contentType": "text"
+              },
+              "subject": "Concurrency Pressure Test 13"
+            },
+            {
+              "id": "msg-concurrency-14",
+              "from": {
+                "emailAddress": {
+                  "address": "stress@test.com",
+                  "name": "Stress Test"
+                }
+              },
+              "toRecipients": [
+                {
+                  "emailAddress": {
+                    "address": "MeganB@M365x214355.onmicrosoft.com"
+                  }
+                }
+              ],
+              "hasAttachments": false,
+              "receivedDateTime": "2024-03-13T12:00:00Z",
+              "body": {
+                "content": "Concurrency message 14",
+                "contentType": "text"
+              },
+              "subject": "Concurrency Pressure Test 14"
+            },
+            {
+              "id": "msg-concurrency-15",
+              "from": {
+                "emailAddress": {
+                  "address": "stress@test.com",
+                  "name": "Stress Test"
+                }
+              },
+              "toRecipients": [
+                {
+                  "emailAddress": {
+                    "address": "MeganB@M365x214355.onmicrosoft.com"
+                  }
+                }
+              ],
+              "hasAttachments": false,
+              "receivedDateTime": "2024-03-13T12:00:00Z",
+              "body": {
+                "content": "Concurrency message 15",
+                "contentType": "text"
+              },
+              "subject": "Concurrency Pressure Test 15"
+            },
+            {
+              "id": "msg-concurrency-16",
+              "from": {
+                "emailAddress": {
+                  "address": "stress@test.com",
+                  "name": "Stress Test"
+                }
+              },
+              "toRecipients": [
+                {
+                  "emailAddress": {
+                    "address": "MeganB@M365x214355.onmicrosoft.com"
+                  }
+                }
+              ],
+              "hasAttachments": false,
+              "receivedDateTime": "2024-03-13T12:00:00Z",
+              "body": {
+                "content": "Concurrency message 16",
+                "contentType": "text"
+              },
+              "subject": "Concurrency Pressure Test 16"
+            },
+            {
+              "id": "msg-concurrency-17",
+              "from": {
+                "emailAddress": {
+                  "address": "stress@test.com",
+                  "name": "Stress Test"
+                }
+              },
+              "toRecipients": [
+                {
+                  "emailAddress": {
+                    "address": "MeganB@M365x214355.onmicrosoft.com"
+                  }
+                }
+              ],
+              "hasAttachments": false,
+              "receivedDateTime": "2024-03-13T12:00:00Z",
+              "body": {
+                "content": "Concurrency message 17",
+                "contentType": "text"
+              },
+              "subject": "Concurrency Pressure Test 17"
+            },
+            {
+              "id": "msg-concurrency-18",
+              "from": {
+                "emailAddress": {
+                  "address": "stress@test.com",
+                  "name": "Stress Test"
+                }
+              },
+              "toRecipients": [
+                {
+                  "emailAddress": {
+                    "address": "MeganB@M365x214355.onmicrosoft.com"
+                  }
+                }
+              ],
+              "hasAttachments": false,
+              "receivedDateTime": "2024-03-13T12:00:00Z",
+              "body": {
+                "content": "Concurrency message 18",
+                "contentType": "text"
+              },
+              "subject": "Concurrency Pressure Test 18"
+            },
+            {
+              "id": "msg-concurrency-19",
+              "from": {
+                "emailAddress": {
+                  "address": "stress@test.com",
+                  "name": "Stress Test"
+                }
+              },
+              "toRecipients": [
+                {
+                  "emailAddress": {
+                    "address": "MeganB@M365x214355.onmicrosoft.com"
+                  }
+                }
+              ],
+              "hasAttachments": false,
+              "receivedDateTime": "2024-03-13T12:00:00Z",
+              "body": {
+                "content": "Concurrency message 19",
+                "contentType": "text"
+              },
+              "subject": "Concurrency Pressure Test 19"
+            },
+            {
+              "id": "msg-concurrency-20",
+              "from": {
+                "emailAddress": {
+                  "address": "stress@test.com",
+                  "name": "Stress Test"
+                }
+              },
+              "toRecipients": [
+                {
+                  "emailAddress": {
+                    "address": "MeganB@M365x214355.onmicrosoft.com"
+                  }
+                }
+              ],
+              "hasAttachments": false,
+              "receivedDateTime": "2024-03-13T12:00:00Z",
+              "body": {
+                "content": "Concurrency message 20",
+                "contentType": "text"
+              },
+              "subject": "Concurrency Pressure Test 20"
+            }
+          ],
+          "@odata.deltaLink": "https://graph.microsoft.com/v1.0/users/MeganB@M365x214355.onmicrosoft.com/mailFolders/Inbox/messages/delta()?$deltatoken=token-done",
+          "@odata.context": "https://graph.microsoft.com/v1.0/$metadata#users('MeganB%40M365x214355.onmicrosoft.com')/mailFolders('Inbox')/messages"
+        },
+        "statusCode": 200
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "url": "https://graph.microsoft.com/v1.0/users/*/messages/msg-nested/attachments"
+      },
+      "response": {
+        "headers": [
+          {
+            "value": "application/json",
+            "name": "Content-Type"
+          }
+        ],
+        "body": {
+          "value": [
+            {
+              "id": "att-nested-recursion",
+              "contentType": "message/rfc822",
+              "size": 2000,
+              "name": "nested_message.eml",
+              "@odata.type": "#microsoft.graph.itemAttachment"
+            }
+          ]
+        },
+        "statusCode": 200
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "url": "https://graph.microsoft.com/v1.0/users/*/messages/msg-massive/attachments"
+      },
+      "response": {
+        "headers": [
+          {
+            "value": "application/json",
+            "name": "Content-Type"
+          }
+        ],
+        "body": {
+          "value": [
+            {
+              "id": "att-001",
+              "contentType": "text/plain",
+              "size": 10,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "file_001.txt",
+              "contentBytes": "Y29udGVudA=="
+            },
+            {
+              "id": "att-002",
+              "contentType": "text/plain",
+              "size": 10,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "file_002.txt",
+              "contentBytes": "Y29udGVudA=="
+            },
+            {
+              "id": "att-003",
+              "contentType": "text/plain",
+              "size": 10,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "file_003.txt",
+              "contentBytes": "Y29udGVudA=="
+            },
+            {
+              "id": "att-004",
+              "contentType": "text/plain",
+              "size": 10,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "file_004.txt",
+              "contentBytes": "Y29udGVudA=="
+            },
+            {
+              "id": "att-005",
+              "contentType": "text/plain",
+              "size": 10,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "file_005.txt",
+              "contentBytes": "Y29udGVudA=="
+            },
+            {
+              "id": "att-006",
+              "contentType": "text/plain",
+              "size": 10,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "file_006.txt",
+              "contentBytes": "Y29udGVudA=="
+            },
+            {
+              "id": "att-007",
+              "contentType": "text/plain",
+              "size": 10,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "file_007.txt",
+              "contentBytes": "Y29udGVudA=="
+            },
+            {
+              "id": "att-008",
+              "contentType": "text/plain",
+              "size": 10,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "file_008.txt",
+              "contentBytes": "Y29udGVudA=="
+            },
+            {
+              "id": "att-009",
+              "contentType": "text/plain",
+              "size": 10,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "file_009.txt",
+              "contentBytes": "Y29udGVudA=="
+            },
+            {
+              "id": "att-010",
+              "contentType": "text/plain",
+              "size": 10,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "file_010.txt",
+              "contentBytes": "Y29udGVudA=="
+            },
+            {
+              "id": "att-011",
+              "contentType": "text/plain",
+              "size": 10,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "file_011.txt",
+              "contentBytes": "Y29udGVudA=="
+            },
+            {
+              "id": "att-012",
+              "contentType": "text/plain",
+              "size": 10,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "file_012.txt",
+              "contentBytes": "Y29udGVudA=="
+            },
+            {
+              "id": "att-013",
+              "contentType": "text/plain",
+              "size": 10,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "file_013.txt",
+              "contentBytes": "Y29udGVudA=="
+            },
+            {
+              "id": "att-014",
+              "contentType": "text/plain",
+              "size": 10,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "file_014.txt",
+              "contentBytes": "Y29udGVudA=="
+            },
+            {
+              "id": "att-015",
+              "contentType": "text/plain",
+              "size": 10,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "file_015.txt",
+              "contentBytes": "Y29udGVudA=="
+            },
+            {
+              "id": "att-016",
+              "contentType": "text/plain",
+              "size": 10,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "file_016.txt",
+              "contentBytes": "Y29udGVudA=="
+            },
+            {
+              "id": "att-017",
+              "contentType": "text/plain",
+              "size": 10,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "file_017.txt",
+              "contentBytes": "Y29udGVudA=="
+            },
+            {
+              "id": "att-018",
+              "contentType": "text/plain",
+              "size": 10,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "file_018.txt",
+              "contentBytes": "Y29udGVudA=="
+            },
+            {
+              "id": "att-019",
+              "contentType": "text/plain",
+              "size": 10,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "file_019.txt",
+              "contentBytes": "Y29udGVudA=="
+            },
+            {
+              "id": "att-020",
+              "contentType": "text/plain",
+              "size": 10,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "file_020.txt",
+              "contentBytes": "Y29udGVudA=="
+            },
+            {
+              "id": "att-021",
+              "contentType": "text/plain",
+              "size": 10,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "file_021.txt",
+              "contentBytes": "Y29udGVudA=="
+            },
+            {
+              "id": "att-022",
+              "contentType": "text/plain",
+              "size": 10,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "file_022.txt",
+              "contentBytes": "Y29udGVudA=="
+            },
+            {
+              "id": "att-023",
+              "contentType": "text/plain",
+              "size": 10,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "file_023.txt",
+              "contentBytes": "Y29udGVudA=="
+            },
+            {
+              "id": "att-024",
+              "contentType": "text/plain",
+              "size": 10,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "file_024.txt",
+              "contentBytes": "Y29udGVudA=="
+            },
+            {
+              "id": "att-025",
+              "contentType": "text/plain",
+              "size": 10,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "file_025.txt",
+              "contentBytes": "Y29udGVudA=="
+            },
+            {
+              "id": "att-026",
+              "contentType": "text/plain",
+              "size": 10,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "file_026.txt",
+              "contentBytes": "Y29udGVudA=="
+            },
+            {
+              "id": "att-027",
+              "contentType": "text/plain",
+              "size": 10,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "file_027.txt",
+              "contentBytes": "Y29udGVudA=="
+            },
+            {
+              "id": "att-028",
+              "contentType": "text/plain",
+              "size": 10,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "file_028.txt",
+              "contentBytes": "Y29udGVudA=="
+            },
+            {
+              "id": "att-029",
+              "contentType": "text/plain",
+              "size": 10,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "file_029.txt",
+              "contentBytes": "Y29udGVudA=="
+            },
+            {
+              "id": "att-030",
+              "contentType": "text/plain",
+              "size": 10,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "file_030.txt",
+              "contentBytes": "Y29udGVudA=="
+            },
+            {
+              "id": "att-031",
+              "contentType": "text/plain",
+              "size": 10,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "file_031.txt",
+              "contentBytes": "Y29udGVudA=="
+            },
+            {
+              "id": "att-032",
+              "contentType": "text/plain",
+              "size": 10,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "file_032.txt",
+              "contentBytes": "Y29udGVudA=="
+            },
+            {
+              "id": "att-033",
+              "contentType": "text/plain",
+              "size": 10,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "file_033.txt",
+              "contentBytes": "Y29udGVudA=="
+            },
+            {
+              "id": "att-034",
+              "contentType": "text/plain",
+              "size": 10,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "file_034.txt",
+              "contentBytes": "Y29udGVudA=="
+            },
+            {
+              "id": "att-035",
+              "contentType": "text/plain",
+              "size": 10,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "file_035.txt",
+              "contentBytes": "Y29udGVudA=="
+            },
+            {
+              "id": "att-036",
+              "contentType": "text/plain",
+              "size": 10,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "file_036.txt",
+              "contentBytes": "Y29udGVudA=="
+            },
+            {
+              "id": "att-037",
+              "contentType": "text/plain",
+              "size": 10,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "file_037.txt",
+              "contentBytes": "Y29udGVudA=="
+            },
+            {
+              "id": "att-038",
+              "contentType": "text/plain",
+              "size": 10,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "file_038.txt",
+              "contentBytes": "Y29udGVudA=="
+            },
+            {
+              "id": "att-039",
+              "contentType": "text/plain",
+              "size": 10,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "file_039.txt",
+              "contentBytes": "Y29udGVudA=="
+            },
+            {
+              "id": "att-040",
+              "contentType": "text/plain",
+              "size": 10,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "file_040.txt",
+              "contentBytes": "Y29udGVudA=="
+            },
+            {
+              "id": "att-041",
+              "contentType": "text/plain",
+              "size": 10,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "file_041.txt",
+              "contentBytes": "Y29udGVudA=="
+            },
+            {
+              "id": "att-042",
+              "contentType": "text/plain",
+              "size": 10,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "file_042.txt",
+              "contentBytes": "Y29udGVudA=="
+            },
+            {
+              "id": "att-043",
+              "contentType": "text/plain",
+              "size": 10,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "file_043.txt",
+              "contentBytes": "Y29udGVudA=="
+            },
+            {
+              "id": "att-044",
+              "contentType": "text/plain",
+              "size": 10,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "file_044.txt",
+              "contentBytes": "Y29udGVudA=="
+            },
+            {
+              "id": "att-045",
+              "contentType": "text/plain",
+              "size": 10,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "file_045.txt",
+              "contentBytes": "Y29udGVudA=="
+            },
+            {
+              "id": "att-046",
+              "contentType": "text/plain",
+              "size": 10,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "file_046.txt",
+              "contentBytes": "Y29udGVudA=="
+            },
+            {
+              "id": "att-047",
+              "contentType": "text/plain",
+              "size": 10,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "file_047.txt",
+              "contentBytes": "Y29udGVudA=="
+            },
+            {
+              "id": "att-048",
+              "contentType": "text/plain",
+              "size": 10,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "file_048.txt",
+              "contentBytes": "Y29udGVudA=="
+            },
+            {
+              "id": "att-049",
+              "contentType": "text/plain",
+              "size": 10,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "file_049.txt",
+              "contentBytes": "Y29udGVudA=="
+            },
+            {
+              "id": "att-050",
+              "contentType": "text/plain",
+              "size": 10,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "file_050.txt",
+              "contentBytes": "Y29udGVudA=="
+            },
+            {
+              "id": "att-051",
+              "contentType": "text/plain",
+              "size": 10,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "file_051.txt",
+              "contentBytes": "Y29udGVudA=="
+            },
+            {
+              "id": "att-052",
+              "contentType": "text/plain",
+              "size": 10,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "file_052.txt",
+              "contentBytes": "Y29udGVudA=="
+            },
+            {
+              "id": "att-053",
+              "contentType": "text/plain",
+              "size": 10,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "file_053.txt",
+              "contentBytes": "Y29udGVudA=="
+            },
+            {
+              "id": "att-054",
+              "contentType": "text/plain",
+              "size": 10,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "file_054.txt",
+              "contentBytes": "Y29udGVudA=="
+            },
+            {
+              "id": "att-055",
+              "contentType": "text/plain",
+              "size": 10,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "file_055.txt",
+              "contentBytes": "Y29udGVudA=="
+            },
+            {
+              "id": "att-056",
+              "contentType": "text/plain",
+              "size": 10,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "file_056.txt",
+              "contentBytes": "Y29udGVudA=="
+            },
+            {
+              "id": "att-057",
+              "contentType": "text/plain",
+              "size": 10,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "file_057.txt",
+              "contentBytes": "Y29udGVudA=="
+            },
+            {
+              "id": "att-058",
+              "contentType": "text/plain",
+              "size": 10,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "file_058.txt",
+              "contentBytes": "Y29udGVudA=="
+            },
+            {
+              "id": "att-059",
+              "contentType": "text/plain",
+              "size": 10,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "file_059.txt",
+              "contentBytes": "Y29udGVudA=="
+            },
+            {
+              "id": "att-060",
+              "contentType": "text/plain",
+              "size": 10,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "file_060.txt",
+              "contentBytes": "Y29udGVudA=="
+            },
+            {
+              "id": "att-061",
+              "contentType": "text/plain",
+              "size": 10,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "file_061.txt",
+              "contentBytes": "Y29udGVudA=="
+            },
+            {
+              "id": "att-062",
+              "contentType": "text/plain",
+              "size": 10,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "file_062.txt",
+              "contentBytes": "Y29udGVudA=="
+            },
+            {
+              "id": "att-063",
+              "contentType": "text/plain",
+              "size": 10,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "file_063.txt",
+              "contentBytes": "Y29udGVudA=="
+            },
+            {
+              "id": "att-064",
+              "contentType": "text/plain",
+              "size": 10,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "file_064.txt",
+              "contentBytes": "Y29udGVudA=="
+            },
+            {
+              "id": "att-065",
+              "contentType": "text/plain",
+              "size": 10,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "file_065.txt",
+              "contentBytes": "Y29udGVudA=="
+            },
+            {
+              "id": "att-066",
+              "contentType": "text/plain",
+              "size": 10,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "file_066.txt",
+              "contentBytes": "Y29udGVudA=="
+            },
+            {
+              "id": "att-067",
+              "contentType": "text/plain",
+              "size": 10,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "file_067.txt",
+              "contentBytes": "Y29udGVudA=="
+            },
+            {
+              "id": "att-068",
+              "contentType": "text/plain",
+              "size": 10,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "file_068.txt",
+              "contentBytes": "Y29udGVudA=="
+            },
+            {
+              "id": "att-069",
+              "contentType": "text/plain",
+              "size": 10,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "file_069.txt",
+              "contentBytes": "Y29udGVudA=="
+            },
+            {
+              "id": "att-070",
+              "contentType": "text/plain",
+              "size": 10,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "file_070.txt",
+              "contentBytes": "Y29udGVudA=="
+            },
+            {
+              "id": "att-071",
+              "contentType": "text/plain",
+              "size": 10,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "file_071.txt",
+              "contentBytes": "Y29udGVudA=="
+            },
+            {
+              "id": "att-072",
+              "contentType": "text/plain",
+              "size": 10,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "file_072.txt",
+              "contentBytes": "Y29udGVudA=="
+            },
+            {
+              "id": "att-073",
+              "contentType": "text/plain",
+              "size": 10,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "file_073.txt",
+              "contentBytes": "Y29udGVudA=="
+            },
+            {
+              "id": "att-074",
+              "contentType": "text/plain",
+              "size": 10,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "file_074.txt",
+              "contentBytes": "Y29udGVudA=="
+            },
+            {
+              "id": "att-075",
+              "contentType": "text/plain",
+              "size": 10,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "file_075.txt",
+              "contentBytes": "Y29udGVudA=="
+            },
+            {
+              "id": "att-076",
+              "contentType": "text/plain",
+              "size": 10,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "file_076.txt",
+              "contentBytes": "Y29udGVudA=="
+            },
+            {
+              "id": "att-077",
+              "contentType": "text/plain",
+              "size": 10,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "file_077.txt",
+              "contentBytes": "Y29udGVudA=="
+            },
+            {
+              "id": "att-078",
+              "contentType": "text/plain",
+              "size": 10,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "file_078.txt",
+              "contentBytes": "Y29udGVudA=="
+            },
+            {
+              "id": "att-079",
+              "contentType": "text/plain",
+              "size": 10,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "file_079.txt",
+              "contentBytes": "Y29udGVudA=="
+            },
+            {
+              "id": "att-080",
+              "contentType": "text/plain",
+              "size": 10,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "file_080.txt",
+              "contentBytes": "Y29udGVudA=="
+            },
+            {
+              "id": "att-081",
+              "contentType": "text/plain",
+              "size": 10,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "file_081.txt",
+              "contentBytes": "Y29udGVudA=="
+            },
+            {
+              "id": "att-082",
+              "contentType": "text/plain",
+              "size": 10,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "file_082.txt",
+              "contentBytes": "Y29udGVudA=="
+            },
+            {
+              "id": "att-083",
+              "contentType": "text/plain",
+              "size": 10,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "file_083.txt",
+              "contentBytes": "Y29udGVudA=="
+            },
+            {
+              "id": "att-084",
+              "contentType": "text/plain",
+              "size": 10,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "file_084.txt",
+              "contentBytes": "Y29udGVudA=="
+            },
+            {
+              "id": "att-085",
+              "contentType": "text/plain",
+              "size": 10,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "file_085.txt",
+              "contentBytes": "Y29udGVudA=="
+            },
+            {
+              "id": "att-086",
+              "contentType": "text/plain",
+              "size": 10,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "file_086.txt",
+              "contentBytes": "Y29udGVudA=="
+            },
+            {
+              "id": "att-087",
+              "contentType": "text/plain",
+              "size": 10,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "file_087.txt",
+              "contentBytes": "Y29udGVudA=="
+            },
+            {
+              "id": "att-088",
+              "contentType": "text/plain",
+              "size": 10,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "file_088.txt",
+              "contentBytes": "Y29udGVudA=="
+            },
+            {
+              "id": "att-089",
+              "contentType": "text/plain",
+              "size": 10,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "file_089.txt",
+              "contentBytes": "Y29udGVudA=="
+            },
+            {
+              "id": "att-090",
+              "contentType": "text/plain",
+              "size": 10,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "file_090.txt",
+              "contentBytes": "Y29udGVudA=="
+            },
+            {
+              "id": "att-091",
+              "contentType": "text/plain",
+              "size": 10,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "file_091.txt",
+              "contentBytes": "Y29udGVudA=="
+            },
+            {
+              "id": "att-092",
+              "contentType": "text/plain",
+              "size": 10,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "file_092.txt",
+              "contentBytes": "Y29udGVudA=="
+            },
+            {
+              "id": "att-093",
+              "contentType": "text/plain",
+              "size": 10,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "file_093.txt",
+              "contentBytes": "Y29udGVudA=="
+            },
+            {
+              "id": "att-094",
+              "contentType": "text/plain",
+              "size": 10,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "file_094.txt",
+              "contentBytes": "Y29udGVudA=="
+            },
+            {
+              "id": "att-095",
+              "contentType": "text/plain",
+              "size": 10,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "file_095.txt",
+              "contentBytes": "Y29udGVudA=="
+            },
+            {
+              "id": "att-096",
+              "contentType": "text/plain",
+              "size": 10,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "file_096.txt",
+              "contentBytes": "Y29udGVudA=="
+            },
+            {
+              "id": "att-097",
+              "contentType": "text/plain",
+              "size": 10,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "file_097.txt",
+              "contentBytes": "Y29udGVudA=="
+            },
+            {
+              "id": "att-098",
+              "contentType": "text/plain",
+              "size": 10,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "file_098.txt",
+              "contentBytes": "Y29udGVudA=="
+            },
+            {
+              "id": "att-099",
+              "contentType": "text/plain",
+              "size": 10,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "file_099.txt",
+              "contentBytes": "Y29udGVudA=="
+            },
+            {
+              "id": "att-100",
+              "contentType": "text/plain",
+              "size": 10,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "file_100.txt",
+              "contentBytes": "Y29udGVudA=="
+            },
+            {
+              "id": "att-101",
+              "contentType": "text/plain",
+              "size": 10,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "file_101.txt",
+              "contentBytes": "Y29udGVudA=="
+            },
+            {
+              "id": "att-102",
+              "contentType": "text/plain",
+              "size": 10,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "file_102.txt",
+              "contentBytes": "Y29udGVudA=="
+            },
+            {
+              "id": "att-103",
+              "contentType": "text/plain",
+              "size": 10,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "file_103.txt",
+              "contentBytes": "Y29udGVudA=="
+            },
+            {
+              "id": "att-104",
+              "contentType": "text/plain",
+              "size": 10,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "file_104.txt",
+              "contentBytes": "Y29udGVudA=="
+            },
+            {
+              "id": "att-105",
+              "contentType": "text/plain",
+              "size": 10,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "file_105.txt",
+              "contentBytes": "Y29udGVudA=="
+            }
+          ]
+        },
+        "statusCode": 200
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "url": "https://graph.microsoft.com/v1.0/users/*/messages/msg-kitchen-sink/attachments"
+      },
+      "response": {
+        "headers": [
+          {
+            "value": "application/json",
+            "name": "Content-Type"
+          }
+        ],
+        "body": {
+          "value": [
+            {
+              "id": "att-ks-01",
+              "contentType": "application/pdf",
+              "size": 100,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "doc_01.pdf",
+              "contentBytes": "UERGX0NPTlRFTlQ="
+            },
+            {
+              "id": "att-ks-02",
+              "contentType": "image/png",
+              "size": 100,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "image_02.png",
+              "contentBytes": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg=="
+            },
+            {
+              "id": "att-ks-03",
+              "contentType": "message/rfc822",
+              "size": 500,
+              "name": "nested_03.eml",
+              "@odata.type": "#microsoft.graph.itemAttachment"
+            },
+            {
+              "id": "att-ks-04",
+              "contentType": "image/png",
+              "size": 100,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "image_04.png",
+              "contentBytes": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg=="
+            },
+            {
+              "id": "att-ks-05",
+              "contentType": "application/pdf",
+              "size": 100,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "doc_05.pdf",
+              "contentBytes": "UERGX0NPTlRFTlQ="
+            },
+            {
+              "id": "att-ks-06",
+              "contentType": "message/rfc822",
+              "size": 500,
+              "name": "nested_06.eml",
+              "@odata.type": "#microsoft.graph.itemAttachment"
+            },
+            {
+              "id": "att-ks-07",
+              "contentType": "application/pdf",
+              "size": 100,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "doc_07.pdf",
+              "contentBytes": "UERGX0NPTlRFTlQ="
+            },
+            {
+              "id": "att-ks-08",
+              "contentType": "image/png",
+              "size": 100,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "image_08.png",
+              "contentBytes": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg=="
+            },
+            {
+              "id": "att-ks-09",
+              "contentType": "message/rfc822",
+              "size": 500,
+              "name": "nested_09.eml",
+              "@odata.type": "#microsoft.graph.itemAttachment"
+            },
+            {
+              "id": "att-ks-10",
+              "contentType": "image/png",
+              "size": 100,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "image_10.png",
+              "contentBytes": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg=="
+            },
+            {
+              "id": "att-ks-11",
+              "contentType": "application/pdf",
+              "size": 100,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "doc_11.pdf",
+              "contentBytes": "UERGX0NPTlRFTlQ="
+            },
+            {
+              "id": "att-ks-12",
+              "contentType": "message/rfc822",
+              "size": 500,
+              "name": "nested_12.eml",
+              "@odata.type": "#microsoft.graph.itemAttachment"
+            },
+            {
+              "id": "att-ks-13",
+              "contentType": "application/pdf",
+              "size": 100,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "doc_13.pdf",
+              "contentBytes": "UERGX0NPTlRFTlQ="
+            },
+            {
+              "id": "att-ks-14",
+              "contentType": "image/png",
+              "size": 100,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "image_14.png",
+              "contentBytes": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg=="
+            },
+            {
+              "id": "att-ks-15",
+              "contentType": "message/rfc822",
+              "size": 500,
+              "name": "nested_15.eml",
+              "@odata.type": "#microsoft.graph.itemAttachment"
+            },
+            {
+              "id": "att-ks-16",
+              "contentType": "image/png",
+              "size": 100,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "image_16.png",
+              "contentBytes": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg=="
+            },
+            {
+              "id": "att-ks-17",
+              "contentType": "application/pdf",
+              "size": 100,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "doc_17.pdf",
+              "contentBytes": "UERGX0NPTlRFTlQ="
+            },
+            {
+              "id": "att-ks-18",
+              "contentType": "message/rfc822",
+              "size": 500,
+              "name": "nested_18.eml",
+              "@odata.type": "#microsoft.graph.itemAttachment"
+            },
+            {
+              "id": "att-ks-19",
+              "contentType": "application/pdf",
+              "size": 100,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "doc_19.pdf",
+              "contentBytes": "UERGX0NPTlRFTlQ="
+            },
+            {
+              "id": "att-ks-20",
+              "contentType": "image/png",
+              "size": 100,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "image_20.png",
+              "contentBytes": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg=="
+            },
+            {
+              "id": "att-ks-21",
+              "contentType": "message/rfc822",
+              "size": 500,
+              "name": "nested_21.eml",
+              "@odata.type": "#microsoft.graph.itemAttachment"
+            },
+            {
+              "id": "att-ks-22",
+              "contentType": "image/png",
+              "size": 100,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "image_22.png",
+              "contentBytes": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg=="
+            },
+            {
+              "id": "att-ks-23",
+              "contentType": "application/pdf",
+              "size": 100,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "doc_23.pdf",
+              "contentBytes": "UERGX0NPTlRFTlQ="
+            },
+            {
+              "id": "att-ks-24",
+              "contentType": "message/rfc822",
+              "size": 500,
+              "name": "nested_24.eml",
+              "@odata.type": "#microsoft.graph.itemAttachment"
+            },
+            {
+              "id": "att-ks-25",
+              "contentType": "application/pdf",
+              "size": 100,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "doc_25.pdf",
+              "contentBytes": "UERGX0NPTlRFTlQ="
+            },
+            {
+              "id": "att-ks-26",
+              "contentType": "image/png",
+              "size": 100,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "image_26.png",
+              "contentBytes": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg=="
+            },
+            {
+              "id": "att-ks-27",
+              "contentType": "message/rfc822",
+              "size": 500,
+              "name": "nested_27.eml",
+              "@odata.type": "#microsoft.graph.itemAttachment"
+            },
+            {
+              "id": "att-ks-28",
+              "contentType": "image/png",
+              "size": 100,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "image_28.png",
+              "contentBytes": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg=="
+            },
+            {
+              "id": "att-ks-29",
+              "contentType": "application/pdf",
+              "size": 100,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "doc_29.pdf",
+              "contentBytes": "UERGX0NPTlRFTlQ="
+            },
+            {
+              "id": "att-ks-30",
+              "contentType": "message/rfc822",
+              "size": 500,
+              "name": "nested_30.eml",
+              "@odata.type": "#microsoft.graph.itemAttachment"
+            },
+            {
+              "id": "att-ks-31",
+              "contentType": "application/pdf",
+              "size": 100,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "doc_31.pdf",
+              "contentBytes": "UERGX0NPTlRFTlQ="
+            },
+            {
+              "id": "att-ks-32",
+              "contentType": "image/png",
+              "size": 100,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "image_32.png",
+              "contentBytes": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg=="
+            },
+            {
+              "id": "att-ks-33",
+              "contentType": "message/rfc822",
+              "size": 500,
+              "name": "nested_33.eml",
+              "@odata.type": "#microsoft.graph.itemAttachment"
+            },
+            {
+              "id": "att-ks-34",
+              "contentType": "image/png",
+              "size": 100,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "image_34.png",
+              "contentBytes": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg=="
+            },
+            {
+              "id": "att-ks-35",
+              "contentType": "application/pdf",
+              "size": 100,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "doc_35.pdf",
+              "contentBytes": "UERGX0NPTlRFTlQ="
+            },
+            {
+              "id": "att-ks-36",
+              "contentType": "message/rfc822",
+              "size": 500,
+              "name": "nested_36.eml",
+              "@odata.type": "#microsoft.graph.itemAttachment"
+            },
+            {
+              "id": "att-ks-37",
+              "contentType": "application/pdf",
+              "size": 100,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "doc_37.pdf",
+              "contentBytes": "UERGX0NPTlRFTlQ="
+            },
+            {
+              "id": "att-ks-38",
+              "contentType": "image/png",
+              "size": 100,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "image_38.png",
+              "contentBytes": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg=="
+            },
+            {
+              "id": "att-ks-39",
+              "contentType": "message/rfc822",
+              "size": 500,
+              "name": "nested_39.eml",
+              "@odata.type": "#microsoft.graph.itemAttachment"
+            },
+            {
+              "id": "att-ks-40",
+              "contentType": "image/png",
+              "size": 100,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "image_40.png",
+              "contentBytes": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg=="
+            },
+            {
+              "id": "att-ks-41",
+              "contentType": "application/pdf",
+              "size": 100,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "doc_41.pdf",
+              "contentBytes": "UERGX0NPTlRFTlQ="
+            },
+            {
+              "id": "att-ks-42",
+              "contentType": "message/rfc822",
+              "size": 500,
+              "name": "nested_42.eml",
+              "@odata.type": "#microsoft.graph.itemAttachment"
+            },
+            {
+              "id": "att-ks-43",
+              "contentType": "application/pdf",
+              "size": 100,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "doc_43.pdf",
+              "contentBytes": "UERGX0NPTlRFTlQ="
+            },
+            {
+              "id": "att-ks-44",
+              "contentType": "image/png",
+              "size": 100,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "image_44.png",
+              "contentBytes": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg=="
+            },
+            {
+              "id": "att-ks-45",
+              "contentType": "message/rfc822",
+              "size": 500,
+              "name": "nested_45.eml",
+              "@odata.type": "#microsoft.graph.itemAttachment"
+            },
+            {
+              "id": "att-ks-46",
+              "contentType": "image/png",
+              "size": 100,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "image_46.png",
+              "contentBytes": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg=="
+            },
+            {
+              "id": "att-ks-47",
+              "contentType": "application/pdf",
+              "size": 100,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "doc_47.pdf",
+              "contentBytes": "UERGX0NPTlRFTlQ="
+            },
+            {
+              "id": "att-ks-48",
+              "contentType": "message/rfc822",
+              "size": 500,
+              "name": "nested_48.eml",
+              "@odata.type": "#microsoft.graph.itemAttachment"
+            },
+            {
+              "id": "att-ks-49",
+              "contentType": "application/pdf",
+              "size": 100,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "doc_49.pdf",
+              "contentBytes": "UERGX0NPTlRFTlQ="
+            },
+            {
+              "id": "att-ks-50",
+              "contentType": "image/png",
+              "size": 100,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "image_50.png",
+              "contentBytes": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg=="
+            },
+            {
+              "id": "att-ks-51",
+              "contentType": "message/rfc822",
+              "size": 500,
+              "name": "nested_51.eml",
+              "@odata.type": "#microsoft.graph.itemAttachment"
+            }
+          ]
+        },
+        "statusCode": 200
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "url": "https://graph.microsoft.com/v1.0/users/*/messages/msg-hi-fi/attachments"
+      },
+      "response": {
+        "headers": [
+          {
+            "value": "application/json",
+            "name": "Content-Type"
+          }
+        ],
+        "body": {
+          "value": [
+            {
+              "id": "att-special-1",
+              "contentType": "text/plain",
+              "size": 10,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "!@#$%^&()_+-=[]{}.txt",
+              "contentBytes": "Y29udGVudA=="
+            },
+            {
+              "id": "att-special-2",
+              "contentType": "application/pdf",
+              "size": 1024,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "file with spaces.pdf",
+              "contentBytes": "UERGX0NPTlRFTlQ="
+            },
+            {
+              "id": "att-special-3",
+              "contentType": "application/octet-stream",
+              "size": 0,
+              "@odata.type": "#microsoft.graph.fileAttachment",
+              "name": "empty.dat",
+              "contentBytes": ""
+            },
+            {
+              "id": "att-hi-fi-nested",
+              "contentType": "message/rfc822",
+              "size": 2000,
+              "name": "complex_nested.eml",
+              "@odata.type": "#microsoft.graph.itemAttachment"
+            }
+          ]
+        },
+        "statusCode": 200
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "url": "https://graph.microsoft.com/v1.0/users/*/messages/msg-recursive/attachments"
+      },
+      "response": {
+        "headers": [
+          {
+            "value": "application/json",
+            "name": "Content-Type"
+          }
+        ],
+        "body": {
+          "value": [
+            {
+              "id": "att-recursive-1",
+              "contentType": "message/rfc822",
+              "size": 1000,
+              "name": "recursive_1.eml",
+              "@odata.type": "#microsoft.graph.itemAttachment"
+            }
+          ]
+        },
+        "statusCode": 200
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "url": "https://graph.microsoft.com/v1.0/users/*/messages/msg-nested/attachments/att-nested-recursion/$value"
+      },
+      "response": {
+        "headers": [
+          {
+            "value": "message/rfc822",
+            "name": "Content-Type"
+          }
+        ],
+        "body": "@f:\\temp\\o365mbx_UTESTS\\nested_recursion.eml",
+        "statusCode": 200
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "url": "https://graph.microsoft.com/v1.0/users/*/messages/msg-hi-fi/attachments/att-hi-fi-nested/$value"
+      },
+      "response": {
+        "headers": [
+          {
+            "value": "message/rfc822",
+            "name": "Content-Type"
+          }
+        ],
+        "body": "@f:\\temp\\o365mbx_UTESTS\\complex_nested.eml",
+        "statusCode": 200
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "url": "https://graph.microsoft.com/v1.0/users/*/messages/msg-recursive/attachments/att-recursive-1/$value"
+      },
+      "response": {
+        "headers": [
+          {
+            "value": "message/rfc822",
+            "name": "Content-Type"
+          }
+        ],
+        "body": "@f:\\temp\\o365mbx_UTESTS\\recursive_1.eml",
+        "statusCode": 200
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "url": "https://graph.microsoft.com/v1.0/users/*/messages/*/attachments/*/$value"
+      },
+      "response": {
+        "headers": [
+          {
+            "value": "application/octet-stream",
+            "name": "Content-Type"
+          }
+        ],
+        "body": "DUMMY_BINARY_DATA",
+        "statusCode": 200
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "url": "https://graph.microsoft.com/v1.0/me*"
+      },
+      "response": {
+        "headers": [
+          {
+            "value": "application/json; odata.metadata=minimal",
+            "name": "Content-Type"
+          }
+        ],
+        "body": {
+          "id": "48d31887-5fad-4d73-a9f5-3c356e68a038",
+          "displayName": "Megan Bowen",
+          "userPrincipalName": "MeganB@M365x214355.onmicrosoft.com"
+        },
+        "statusCode": 200
+      }
+    }
+  ],
+  "$schema": "https://raw.githubusercontent.com/dotnet/dev-proxy/main/schemas/v2.2.0/mockresponseplugin.mocksfile.schema.json"
+}

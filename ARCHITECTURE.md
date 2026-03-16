@@ -72,6 +72,34 @@ The application is designed to be highly resilient against network issues, API l
 
 *   **Bandwidth Limiting:** An optional `bandwidthLimiter` in `filehandler` allows users to cap the download speed of attachments, which can be useful in environments with limited network capacity.
 
+## Complex Attachment Processing (ItemAttachments)
+
+The application features advanced handling for "ItemAttachments" (nested emails, often `.msg` or `.eml` files). This logic is encapsulated within the `filehandler` package and is designed to handle the complexities of MIME structures while maintaining performance and security.
+
+### 1. Attachment Type Identification
+The system distinguishes between `FileAttachment` (standard files) and `ItemAttachment` (nested messages).
+*   **FileAttachments**: Saved directly using content bytes.
+*   **ItemAttachments**: Processed using the Microsoft Graph API `$value` endpoint to retrieve the raw MIME (RFC 822) stream, ensuring the original message structure is preserved.
+
+### 2. Processing Modes
+The `msgHandler` configuration (set via `-msg-handler` flag or `config.json`) determines the processing depth:
+*   **`raw` (Default)**: The nested message is saved as a single `.eml` file. This is the most performance-efficient mode and preserves the original artifact without modification.
+*   **`extractor`**: Triggers a deep-dive into the attachment content using the `enmime` library.
+
+### 3. Extractor Logic and Specifications
+When in `extractor` mode, the following architectural specifications apply:
+*   **MIME Parsing**: The saved `.eml` is re-opened and parsed into a MIME envelope.
+*   **Body Extraction**: The message body of the attached email is extracted. The system prioritizes HTML but falls back to plain text if HTML is unavailable. Extracted bodies are saved with an `_extracted.html` (or `.txt`) suffix.
+*   **One-Level Nesting Limit**: To prevent infinite recursion and excessive resource usage, the extractor only processes **one level** of nested attachments. Any attachments found *inside* the attached email are saved to the main `attachments` folder but are not further extracted.
+*   **Deterministic Naming**: 
+    *   Extracted bodies use the format: `%02d_%s_extracted.html`.
+    *   Nested attachments use the format: `%02d_%d_%s` (where `%d` is a sub-sequence number).
+
+### 4. Security and Resource Management
+*   **Preservation**: The original raw `.eml` file is always saved, even when extraction occurs, providing a verifiable audit trail.
+*   **Streaming**: Data is streamed from the API to disk where possible to minimize memory overhead.
+*   **Error Resilience**: If MIME parsing fails, the system logs a warning and proceeds with the raw file, ensuring that one corrupted attachment does not halt the entire processing pipeline.
+
 ## Configuration Management:
 
 The application offers flexible configuration options to adapt to various environments and user preferences.

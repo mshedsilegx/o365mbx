@@ -5,6 +5,7 @@ package emailprocessor
 import (
 	"fmt"
 	"io"
+	"os"
 	"regexp"
 	"strings"
 
@@ -23,6 +24,9 @@ func (ep *EmailProcessor) IsHTML(content string) bool {
 	return htmlTagRegex.MatchString(content)
 }
 
+// EmailProcessorInterface defines the interface for EmailProcessor methods used by other packages.
+//
+//go:generate mockgen -destination=../mocks/mock_emailprocessor.go -package=mocks o365mbx/emailprocessor EmailProcessorInterface
 type EmailProcessorInterface interface {
 	ProcessBody(htmlContent, convertBody, chromiumPath string) (interface{}, error)
 	IsHTML(content string) bool
@@ -54,7 +58,11 @@ func (ep *EmailProcessor) ProcessBody(htmlContent, convertBody, chromiumPath str
 
 // ConvertToPDF converts HTML content to a PDF byte slice using a headless Chromium instance.
 func (ep *EmailProcessor) ConvertToPDF(htmlContent, chromiumPath string) ([]byte, error) {
-	l := launcher.New().Bin(chromiumPath)
+	if _, err := os.Stat(chromiumPath); os.IsNotExist(err) {
+		return nil, fmt.Errorf("chromiumPath does not exist: %s", chromiumPath)
+	}
+
+	l := launcher.New().Bin(chromiumPath).Leakless(false)
 	defer l.Cleanup()
 
 	browserURL, err := l.Launch()

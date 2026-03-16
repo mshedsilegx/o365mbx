@@ -67,6 +67,9 @@ type Metadata struct {
 	Attachments     []AttachmentMetadata `json:"list_of_attachments"`
 }
 
+// FileHandlerInterface defines the interface for FileHandler methods used by other packages.
+//
+//go:generate mockgen -destination=../mocks/mock_filehandler.go -package=mocks o365mbx/filehandler FileHandlerInterface
 type FileHandlerInterface interface {
 	CreateWorkspace() error
 	SaveMessage(message models.Messageable, bodyContent interface{}, convertBody string) (string, error)
@@ -75,6 +78,23 @@ type FileHandlerInterface interface {
 	WriteAttachmentsToMetadata(msgPath string, attachments []AttachmentMetadata) error
 	SaveState(state *o365client.RunState, stateFilePath string) error
 	LoadState(stateFilePath string) (*o365client.RunState, error)
+	SaveError(msgPath string, errs []error) error
+	SaveStatusReport(mailboxName string, sourceCounts map[string]int32, processedCount, errorCount int) error
+}
+
+// ErrorDetail represents a single error entry in error.json
+type ErrorDetail struct {
+	Timestamp string `json:"timestamp"`
+	Message   string `json:"message"`
+}
+
+// JobStatus represents the structure of status_<timestamp>.json
+type JobStatus struct {
+	Mailbox           string           `json:"mailbox"`
+	Timestamp         string           `json:"timestamp"`
+	SourceCounts      map[string]int32 `json:"source_mailbox_counts"`
+	JobProcessedCount int              `json:"job_processed_count"`
+	JobErrorCount     int              `json:"job_error_count"`
 }
 
 // FileHandler handles the disk-based storage and retrieval logic for the application.
@@ -88,9 +108,10 @@ type FileHandler struct {
 	fileMutexes              map[string]*sync.Mutex
 	mapMutex                 sync.Mutex
 	msgHandler               string
+	attachmentExtractionL1   string
 }
 
-func NewFileHandler(workspacePath string, o365Client o365client.O365ClientInterface, emailProcessor emailprocessor.EmailProcessorInterface, largeAttachmentThresholdMB, chunkSizeMB int, bandwidthLimitMBs float64, msgHandler string, logger log.FieldLogger) *FileHandler {
+func NewFileHandler(workspacePath string, o365Client o365client.O365ClientInterface, emailProcessor emailprocessor.EmailProcessorInterface, largeAttachmentThresholdMB, chunkSizeMB int, bandwidthLimitMBs float64, msgHandler string, attachmentExtractionL1 string, logger log.FieldLogger) *FileHandler {
 	var limiter *rate.Limiter
 	if bandwidthLimitMBs > 0 {
 		limit := rate.Limit(bandwidthLimitMBs * 1024 * 1024)
@@ -107,6 +128,7 @@ func NewFileHandler(workspacePath string, o365Client o365client.O365ClientInterf
 		bandwidthLimiter:         limiter,
 		fileMutexes:              make(map[string]*sync.Mutex),
 		msgHandler:               msgHandler,
+		attachmentExtractionL1:   attachmentExtractionL1,
 	}
 }
 
@@ -294,7 +316,7 @@ func (fh *FileHandler) SaveAttachmentFromBytes(ctx context.Context, mailboxName,
 // saveFileAttachment saves a standard file attachment.
 func (fh *FileHandler) saveFileAttachment(msgPath string, att models.Attachmentable, sequence int) (*AttachmentMetadata, error) {
 	fileAttachment, _ := att.(*models.FileAttachment)
-	fileName := fmt.Sprintf("%02d_%s", sequence, sanitizeFileName(utils.StringValue(fileAttachment.GetName(), "unnamed")))
+	fileName := fmt.Sprintf("%02d_%s", sequence, SanitizeFileName(utils.StringValue(fileAttachment.GetName(), "unnamed")))
 	filePath := filepath.Join(msgPath, "attachments", fileName)
 	if isPathTooLong(filePath) {
 		return nil, &apperrors.FileSystemError{Path: filePath, Msg: "generated attachment file path exceeds maximum length", Err: nil}
@@ -338,7 +360,7 @@ func (fh *FileHandler) SaveItemAttachment(ctx context.Context, mailboxName, mess
 	}()
 
 	// 1. Save the original item attachment (the .eml itself)
-	saveName := fmt.Sprintf("%02d_%s", sequence, sanitizeFileName(attachmentName))
+	saveName := fmt.Sprintf("%02d_%s", sequence, SanitizeFileName(attachmentName))
 	if !strings.Contains(saveName, ".") {
 		saveName += ".eml"
 	}
@@ -398,7 +420,7 @@ func (fh *FileHandler) SaveItemAttachment(ctx context.Context, mailboxName, mess
 		}
 
 		if bodyContent != "" {
-			bodyName := fmt.Sprintf("%02d_%s_extracted%s", sequence, sanitizeFileName(attachmentName), bodyExt)
+			bodyName := fmt.Sprintf("%02d_%s_extracted%s", sequence, SanitizeFileName(attachmentName), bodyExt)
 			bodyPath := filepath.Join(msgPath, "attachments", bodyName)
 			// #nosec G304 - bodyPath is constructed from msgPath and bodyName, not direct user input.
 			if err := os.WriteFile(bodyPath, []byte(bodyContent), 0600); err == nil {
@@ -422,16 +444,25 @@ func (fh *FileHandler) SaveItemAttachment(ctx context.Context, mailboxName, mess
 
 // extractFilesFromEnvelope handles one level of extraction from a parsed MIME envelope.
 func (fh *FileHandler) extractFilesFromEnvelope(env *enmime.Envelope, msgPath string, parentSequence int) []AttachmentMetadata {
+	if fh.msgHandler == "raw" {
+		return nil
+	}
+
 	var metadatas []AttachmentMetadata
 
-	for i, part := range env.Attachments {
+	allParts := env.Attachments
+	if fh.attachmentExtractionL1 == "inlines" {
+		allParts = append(allParts, env.Inlines...)
+	}
+
+	for i, part := range allParts {
 		nestedCount := i + 1
 		fileName := part.FileName
 		if fileName == "" {
 			fileName = fmt.Sprintf("attachment_%d", nestedCount)
 		}
 
-		safeName := fmt.Sprintf("%02d_%d_%s", parentSequence, nestedCount, sanitizeFileName(fileName))
+		safeName := fmt.Sprintf("%02d_%d_%s", parentSequence, nestedCount, SanitizeFileName(fileName))
 		filePath := filepath.Join(msgPath, "attachments", safeName)
 
 		log.WithField("nestedName", fileName).Infof("-> Extracting: %s", safeName)
@@ -531,8 +562,74 @@ func (fh *FileHandler) LoadState(stateFilePath string) (*o365client.RunState, er
 	return &state, nil
 }
 
-// sanitizeFileName removes invalid characters from a string to be used as a file name.
-func sanitizeFileName(name string) string {
+// SaveError creates an error.json file in the message folder with the provided errors.
+func (fh *FileHandler) SaveError(msgPath string, errs []error) error {
+	if len(errs) == 0 {
+		return nil
+	}
+
+	var existingErrors []ErrorDetail
+
+	// Use os.OpenRoot (Go 1.24+) to safely read existing errors and prevent directory traversal (G304)
+	if root, err := os.OpenRoot(msgPath); err == nil {
+		if data, err := root.ReadFile("error.json"); err == nil {
+			_ = json.Unmarshal(data, &existingErrors)
+		}
+		_ = root.Close() // Explicitly ignore close error for read-only root
+	}
+
+	timestamp := time.Now().UTC().Format(time.RFC3339)
+	for _, err := range errs {
+		if err != nil {
+			existingErrors = append(existingErrors, ErrorDetail{
+				Timestamp: timestamp,
+				Message:   err.Error(),
+			})
+		}
+	}
+
+	data, err := json.MarshalIndent(existingErrors, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal error details: %w", err)
+	}
+
+	// Use os.OpenRoot (Go 1.24+) to safely write the error file
+	root, err := os.OpenRoot(msgPath)
+	if err != nil {
+		return fmt.Errorf("failed to open root for writing error: %w", err)
+	}
+	defer func() {
+		_ = root.Close()
+	}()
+
+	return root.WriteFile("error.json", data, 0600)
+}
+
+// SaveStatusReport creates a status_<timestamp>.json file at the root of the workspace.
+func (fh *FileHandler) SaveStatusReport(mailboxName string, sourceCounts map[string]int32, processedCount, errorCount int) error {
+	now := time.Now().UTC()
+	timestamp := now.Format(time.RFC3339)
+	fileTimestamp := now.Format("20060102_150405")
+
+	status := JobStatus{
+		Mailbox:           mailboxName,
+		Timestamp:         timestamp,
+		SourceCounts:      sourceCounts,
+		JobProcessedCount: processedCount,
+		JobErrorCount:     errorCount,
+	}
+
+	data, err := json.MarshalIndent(status, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal job status: %w", err)
+	}
+
+	statusPath := filepath.Join(fh.workspacePath, fmt.Sprintf("status_%s.json", fileTimestamp))
+	return os.WriteFile(statusPath, data, 0600)
+}
+
+// SanitizeFileName removes invalid characters from a string to be used as a file name.
+func SanitizeFileName(name string) string {
 	// Replace path traversal sequences iteratively to handle cases like "...".
 	sanitized := name
 	for strings.Contains(sanitized, "..") {

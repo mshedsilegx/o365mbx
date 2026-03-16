@@ -1,0 +1,29 @@
+{
+	"Golang errors": {},
+	"Issues": [
+		{
+			"severity": "MEDIUM",
+			"confidence": "HIGH",
+			"cwe": {
+				"id": "22",
+				"url": "https://cwe.mitre.org/data/definitions/22.html"
+			},
+			"rule_id": "G304",
+			"details": "Potential file inclusion via variable",
+			"file": "E:\\data\\devel\\build\\code\\private\\o365mbx\\filehandler\\filehandler.go",
+			"code": "575: \tif _, err := os.Stat(errorPath); err == nil {\n576: \t\tdata, err := os.ReadFile(errorPath)\n577: \t\tif err == nil {\n",
+			"line": "576",
+			"column": "16",
+			"nosec": false,
+			"suppressions": null,
+			"autofix": "Consider using os.Root to scope file access under a fixed root (Go \u003e=1.24). Prefer root.Open/root.Stat over os.Open/os.Stat to prevent directory traversal."
+		}
+	],
+	"Stats": {
+		"files": 15,
+		"lines": 3103,
+		"nosec": 18,
+		"found": 1
+	},
+	"GosecVersion": "2.24.7"
+}

@@ -49,7 +49,8 @@ type Config struct {
 	ChromiumPath string `json:"chromiumPath,omitempty"`
 
 	// ItemAttachment settings
-	MsgHandler string `json:"msgHandler,omitempty"`
+	MsgHandler             string `json:"msgHandler,omitempty"`
+	AttachmentExtractionL1 string `json:"attachmentExtractionL1,omitempty"`
 }
 
 // SetDefaults populates the configuration with sensible default values.
@@ -101,6 +102,9 @@ func (c *Config) SetDefaults() {
 	}
 	if c.MsgHandler == "" {
 		c.MsgHandler = "raw"
+	}
+	if c.AttachmentExtractionL1 == "" {
+		c.AttachmentExtractionL1 = "default"
 	}
 }
 
@@ -154,6 +158,13 @@ func (c *Config) Validate() error {
 		// valid
 	default:
 		return fmt.Errorf("invalid msgHandler value: %s. Must be one of 'raw' or 'extractor'", c.MsgHandler)
+	}
+
+	switch c.AttachmentExtractionL1 {
+	case "default", "inlines":
+		// valid
+	default:
+		return fmt.Errorf("invalid attachmentExtractionL1 value: %s. Must be one of 'default' or 'inlines'", c.AttachmentExtractionL1)
 	}
 
 	if c.ConvertBody == "pdf" {

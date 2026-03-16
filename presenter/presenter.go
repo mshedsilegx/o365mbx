@@ -13,11 +13,11 @@ import (
 )
 
 // RunHealthCheckMode executes a diagnostic run to display mailbox statistics.
-func RunHealthCheckMode(ctx context.Context, client o365client.O365ClientInterface, mailboxName string) {
+func RunHealthCheckMode(ctx context.Context, client o365client.O365ClientInterface, mailboxName string) error {
 	log.WithField("mailbox", mailboxName).Info("Performing health check...")
 	stats, err := client.GetMailboxHealthCheck(ctx, mailboxName)
 	if err != nil {
-		log.Fatalf("O365 API error during health check: %v", err)
+		return fmt.Errorf("O365 API error during health check: %w", err)
 	}
 
 	log.WithField("mailbox", mailboxName).Info("Health check successful.")
@@ -49,10 +49,11 @@ func RunHealthCheckMode(ctx context.Context, client o365client.O365ClientInterfa
 		log.Warnf("Error flushing tabwriter: %v", err)
 	}
 	fmt.Println("-------------------------")
+	return nil
 }
 
 // RunMessageDetailsMode streams and displays metadata for all messages in a specific folder.
-func RunMessageDetailsMode(ctx context.Context, client o365client.O365ClientInterface, mailboxName, folderName string) {
+func RunMessageDetailsMode(ctx context.Context, client o365client.O365ClientInterface, mailboxName, folderName string) error {
 	log.WithFields(log.Fields{
 		"mailbox": mailboxName,
 		"folder":  folderName,
@@ -103,6 +104,7 @@ func RunMessageDetailsMode(ctx context.Context, client o365client.O365ClientInte
 
 	// Check for errors from the goroutine
 	if err := <-errChan; err != nil {
-		log.Fatalf("Failed to get message details: %v", err)
+		return fmt.Errorf("failed to get message details: %w", err)
 	}
+	return nil
 }

@@ -24,7 +24,7 @@ Or, you can use the Registry Editor (regedit.exe):
 A system restart may be required after making this change.`
 
 // checkLongPathSupport verifies that the OS can handle long file paths by checking the Windows registry.
-func checkLongPathSupport() {
+var checkLongPathSupport = func() {
 	log.Debug("Running on Windows, checking registry for long path support...")
 
 	key, err := registry.OpenKey(registry.LOCAL_MACHINE, `SYSTEM\CurrentControlSet\Control\FileSystem`, registry.QUERY_VALUE)
