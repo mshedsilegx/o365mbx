@@ -8,6 +8,6 @@ package main
 
 // checkLongPathSupport is a no-op on non-Windows systems, as they typically
 // support long paths by default without special configuration.
-func checkLongPathSupport() {
+var checkLongPathSupport = func() {
 	// This function is intentionally empty.
 }
