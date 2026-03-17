@@ -46,6 +46,7 @@ In addition to our vulnerability reporting policy, the application itself is bui
     *   It ensures the path is absolute, preventing ambiguity.
     *   It prohibits the use of critical system directories (e.g., `/`, `/etc`, `/root`) as a workspace to prevent accidental damage to the system.
     *   It verifies that the workspace path is a directory and not a symbolic link. This is a crucial defense against Time-of-Check-to-Time-of-Use (TOCTOU) attacks, where a symlink could be manipulated to cause the application to write files to an unintended location.
+    *   **Secure File Access:** The application uses Go 1.24+ `os.OpenRoot` for file operations within message directories. This provides a hardware-accelerated and OS-enforced boundary that prevents directory traversal attacks, ensuring that file operations are strictly confined to the intended message folder.
 *   **Filename Sanitization:** All filenames from email attachments are rigorously sanitized before being saved to disk. This process removes characters that are invalid in file paths (e.g., `/`, `\`, `*`) and strips path traversal sequences (e.g., `..`) to prevent attackers from writing files outside of the intended workspace directory.
 *   **Path Length Enforcement:** The application checks the total length of the final path for any file it creates. This prevents errors on filesystems with path length limitations (such as Windows) and mitigates potential denial-of-service vectors.
 

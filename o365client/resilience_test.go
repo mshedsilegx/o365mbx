@@ -1,6 +1,10 @@
 //go:build proxy
 // +build proxy
 
+// Package o365client_test contains integration and resilience tests for the o365client package.
+//
+// This file specifically focuses on resilience testing using Microsoft Dev Proxy
+// to simulate real-world network conditions, API failures, and rate limiting.
 package o365client_test
 
 import (
@@ -26,6 +30,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// setupProxiedClient initializes an O365Client configured to route all traffic
+// through a local proxy (defaulting to Dev Proxy at http://127.0.0.1:8000).
+// It also skips TLS verification to allow the proxy to intercept HTTPS traffic.
 func setupProxiedClient(t *testing.T) (*o365client.O365Client, *http.Client) {
 	proxyURLStr := "http://127.0.0.1:8000"
 	proxyURL, _ := url.Parse(proxyURLStr)
@@ -71,6 +78,9 @@ func TestResilience_LiveProxyBehavior(t *testing.T) {
 	defer os.RemoveAll(tmpDir)
 
 	processor := emailprocessor.NewEmailProcessor(log.New())
+	ctx := context.Background()
+	_ = processor.Initialize(ctx, "", 1)
+	defer processor.Close()
 	handler := filehandler.NewFileHandler(tmpDir, client, processor, 20, 8, 0, "extractor", "default", log.New())
 
 	cfg := &engine.Config{
@@ -86,7 +96,7 @@ func TestResilience_LiveProxyBehavior(t *testing.T) {
 	success := false
 	for i := 0; i < 20; i++ {
 		ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
-		err = engine.RunEngine(ctx, cfg, client, processor, handler, "dummy-token", "1.0.0")
+		err = engine.RunEngine(ctx, cfg, client, processor, handler, "1.0.0")
 		cancel()
 
 		if err == nil {
@@ -113,6 +123,9 @@ func TestResilience_DevProxy(t *testing.T) {
 	defer os.RemoveAll(tmpDir)
 
 	processor := emailprocessor.NewEmailProcessor(log.New())
+	ctx := context.Background()
+	_ = processor.Initialize(ctx, "", 1)
+	defer processor.Close()
 	handler := filehandler.NewFileHandler(tmpDir, client, processor, 20, 8, 0, "extractor", "default", log.New())
 
 	cfg := &engine.Config{
@@ -128,7 +141,7 @@ func TestResilience_DevProxy(t *testing.T) {
 	success := false
 	for i := 0; i < 20; i++ {
 		ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
-		err = engine.RunEngine(ctx, cfg, client, processor, handler, "dummy-token", "1.0.0")
+		err = engine.RunEngine(ctx, cfg, client, processor, handler, "1.0.0")
 		cancel()
 
 		if err == nil {
@@ -152,6 +165,9 @@ func TestResilience_NestedAttachmentExtraction(t *testing.T) {
 	defer os.RemoveAll(tmpDir)
 
 	processor := emailprocessor.NewEmailProcessor(log.New())
+	ctx := context.Background()
+	_ = processor.Initialize(ctx, "", 1)
+	defer processor.Close()
 	handler := filehandler.NewFileHandler(tmpDir, client, processor, 20, 8, 0, "extractor", "inlines", log.New())
 
 	cfg := &engine.Config{
@@ -169,7 +185,7 @@ func TestResilience_NestedAttachmentExtraction(t *testing.T) {
 	success := false
 	for i := 0; i < 20; i++ {
 		ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
-		err = engine.RunEngine(ctx, cfg, client, processor, handler, "dummy-token", "1.0.0")
+		err = engine.RunEngine(ctx, cfg, client, processor, handler, "1.0.0")
 		cancel()
 		if err == nil {
 			success = true
@@ -200,6 +216,9 @@ func TestResilience_MassiveAttachmentSet(t *testing.T) {
 	defer os.RemoveAll(tmpDir)
 
 	processor := emailprocessor.NewEmailProcessor(log.New())
+	ctx := context.Background()
+	_ = processor.Initialize(ctx, "", 1)
+	defer processor.Close()
 	handler := filehandler.NewFileHandler(tmpDir, client, processor, 20, 8, 0, "extractor", "default", log.New())
 
 	cfg := &engine.Config{
@@ -215,7 +234,7 @@ func TestResilience_MassiveAttachmentSet(t *testing.T) {
 	success := false
 	for i := 0; i < 20; i++ {
 		ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
-		err = engine.RunEngine(ctx, cfg, client, processor, handler, "dummy-token", "1.0.0")
+		err = engine.RunEngine(ctx, cfg, client, processor, handler, "1.0.0")
 		cancel()
 		if err == nil {
 			success = true
@@ -248,6 +267,9 @@ func TestResilience_ConcurrencyPressure(t *testing.T) {
 	defer os.RemoveAll(tmpDir)
 
 	processor := emailprocessor.NewEmailProcessor(log.New())
+	ctx := context.Background()
+	_ = processor.Initialize(ctx, "", 1)
+	defer processor.Close()
 	handler := filehandler.NewFileHandler(tmpDir, client, processor, 20, 8, 0, "extractor", "default", log.New())
 
 	cfg := &engine.Config{
@@ -263,7 +285,7 @@ func TestResilience_ConcurrencyPressure(t *testing.T) {
 	success := false
 	for i := 0; i < 20; i++ {
 		ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
-		err = engine.RunEngine(ctx, cfg, client, processor, handler, "dummy-token", "1.0.0")
+		err = engine.RunEngine(ctx, cfg, client, processor, handler, "1.0.0")
 		cancel()
 		if err == nil {
 			success = true
@@ -304,6 +326,9 @@ func TestResilience_HighFidelity_InlinesEnabled(t *testing.T) {
 	defer os.RemoveAll(tmpDir)
 
 	processor := emailprocessor.NewEmailProcessor(log.New())
+	ctx := context.Background()
+	_ = processor.Initialize(ctx, "", 1)
+	defer processor.Close()
 	handler := filehandler.NewFileHandler(tmpDir, client, processor, 20, 8, 0, "extractor", "inlines", log.New())
 
 	cfg := &engine.Config{
@@ -322,7 +347,7 @@ func TestResilience_HighFidelity_InlinesEnabled(t *testing.T) {
 	success := false
 	for i := 0; i < 20; i++ {
 		ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
-		err = engine.RunEngine(ctx, cfg, client, processor, handler, "dummy-token", "1.0.0")
+		err = engine.RunEngine(ctx, cfg, client, processor, handler, "1.0.0")
 		cancel()
 		if err == nil {
 			success = true
@@ -365,6 +390,9 @@ func TestResilience_HighFidelity_DefaultMode(t *testing.T) {
 	defer os.RemoveAll(tmpDir)
 
 	processor := emailprocessor.NewEmailProcessor(log.New())
+	ctx := context.Background()
+	_ = processor.Initialize(ctx, "", 1)
+	defer processor.Close()
 	handler := filehandler.NewFileHandler(tmpDir, client, processor, 20, 8, 0, "extractor", "default", log.New())
 
 	cfg := &engine.Config{
@@ -383,7 +411,7 @@ func TestResilience_HighFidelity_DefaultMode(t *testing.T) {
 	success := false
 	for i := 0; i < 20; i++ {
 		ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
-		err = engine.RunEngine(ctx, cfg, client, processor, handler, "dummy-token", "1.0.0")
+		err = engine.RunEngine(ctx, cfg, client, processor, handler, "1.0.0")
 		cancel()
 		if err == nil {
 			success = true

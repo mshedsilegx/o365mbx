@@ -72,21 +72,6 @@ func (mr *MockFileHandlerInterfaceMockRecorder) LoadState(stateFilePath any) *go
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "LoadState", reflect.TypeOf((*MockFileHandlerInterface)(nil).LoadState), stateFilePath)
 }
 
-// SaveAttachment mocks base method.
-func (m *MockFileHandlerInterface) SaveAttachment(ctx context.Context, msgPath string, att models.Attachmentable, accessToken string, sequence int) (*filehandler.AttachmentMetadata, error) {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "SaveAttachment", ctx, msgPath, att, accessToken, sequence)
-	ret0, _ := ret[0].(*filehandler.AttachmentMetadata)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
-
-// SaveAttachment indicates an expected call of SaveAttachment.
-func (mr *MockFileHandlerInterfaceMockRecorder) SaveAttachment(ctx, msgPath, att, accessToken, sequence any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SaveAttachment", reflect.TypeOf((*MockFileHandlerInterface)(nil).SaveAttachment), ctx, msgPath, att, accessToken, sequence)
-}
-
 // SaveAttachmentFromBytes mocks base method.
 func (m *MockFileHandlerInterface) SaveAttachmentFromBytes(ctx context.Context, mailboxName, messageID, msgPath string, att models.Attachmentable, sequence int) ([]filehandler.AttachmentMetadata, error) {
 	m.ctrl.T.Helper()

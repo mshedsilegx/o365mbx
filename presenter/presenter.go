@@ -1,19 +1,32 @@
 // Package presenter provides formatted output and display logic for health checks
 // and message details.
+//
+// OBJECTIVE:
+// This package is responsible for the "Presentation" layer of the application. It takes
+// raw data structures from the engine or client and formats them into human-readable
+// tables and summaries for the console.
+//
+// CORE FUNCTIONALITY:
+//  1. Health Check Display: Formats mailbox-level statistics and folder lists into
+//     aligned tables using 'text/tabwriter'.
+//  2. Message Detail Streaming: Streams and displays metadata for individual messages
+//     within a folder, providing real-time feedback during diagnostic runs.
 package presenter
 
 import (
 	"context"
 	"fmt"
+	"io"
 	"o365mbx/o365client"
-	"os"
 	"text/tabwriter"
 
 	log "github.com/sirupsen/logrus"
 )
 
 // RunHealthCheckMode executes a diagnostic run to display mailbox statistics.
-func RunHealthCheckMode(ctx context.Context, client o365client.O365ClientInterface, mailboxName string) error {
+// It retrieves aggregate stats (total messages, total size) and a sorted list
+// of all folders with their individual item counts and storage sizes.
+func RunHealthCheckMode(ctx context.Context, client o365client.O365ClientInterface, mailboxName string, out io.Writer) error {
 	log.WithField("mailbox", mailboxName).Info("Performing health check...")
 	stats, err := client.GetMailboxHealthCheck(ctx, mailboxName)
 	if err != nil {
@@ -21,16 +34,16 @@ func RunHealthCheckMode(ctx context.Context, client o365client.O365ClientInterfa
 	}
 
 	log.WithField("mailbox", mailboxName).Info("Health check successful.")
-	fmt.Println("\n--- Mailbox Health Check ---")
-	fmt.Printf("Mailbox: %s\n", mailboxName)
-	fmt.Println("------------------------------")
-	fmt.Printf("Total Messages: %d\n", stats.TotalMessages)
-	fmt.Printf("Total Folders: %d\n", len(stats.Folders))
-	fmt.Printf("Total Mailbox Size: %.2f MB\n", float64(stats.TotalMailboxSize)/1024/1024)
-	fmt.Println("------------------------------")
-	fmt.Println("\n--- Folder Statistics ---")
+	_, _ = fmt.Fprintln(out, "\n--- Mailbox Health Check ---")
+	_, _ = fmt.Fprintf(out, "Mailbox: %s\n", mailboxName)
+	_, _ = fmt.Fprintln(out, "------------------------------")
+	_, _ = fmt.Fprintf(out, "Total Messages: %d\n", stats.TotalMessages)
+	_, _ = fmt.Fprintf(out, "Total Folders: %d\n", len(stats.Folders))
+	_, _ = fmt.Fprintf(out, "Total Mailbox Size: %.2f MB\n", float64(stats.TotalMailboxSize)/1024/1024)
+	_, _ = fmt.Fprintln(out, "------------------------------")
+	_, _ = fmt.Fprintln(out, "\n--- Folder Statistics ---")
 
-	w := tabwriter.NewWriter(os.Stdout, 0, 0, 3, ' ', tabwriter.AlignRight)
+	w := tabwriter.NewWriter(out, 0, 0, 3, ' ', tabwriter.AlignRight)
 	if _, err := fmt.Fprintln(w, "Folder\tItems\tSize (KB)\t"); err != nil {
 		log.Warnf("Error writing to tabwriter: %v", err)
 	}
@@ -48,12 +61,14 @@ func RunHealthCheckMode(ctx context.Context, client o365client.O365ClientInterfa
 	if err := w.Flush(); err != nil {
 		log.Warnf("Error flushing tabwriter: %v", err)
 	}
-	fmt.Println("-------------------------")
+	_, _ = fmt.Fprintln(out, "-------------------------")
 	return nil
 }
 
 // RunMessageDetailsMode streams and displays metadata for all messages in a specific folder.
-func RunMessageDetailsMode(ctx context.Context, client o365client.O365ClientInterface, mailboxName, folderName string) error {
+// It provides a granular view of message attributes including sender, recipients,
+// date, subject, and attachment details (count and total size).
+func RunMessageDetailsMode(ctx context.Context, client o365client.O365ClientInterface, mailboxName, folderName string, out io.Writer) error {
 	log.WithFields(log.Fields{
 		"mailbox": mailboxName,
 		"folder":  folderName,
@@ -66,8 +81,8 @@ func RunMessageDetailsMode(ctx context.Context, client o365client.O365ClientInte
 		errChan <- client.GetMessageDetailsForFolder(ctx, mailboxName, folderName, detailsChan)
 	}()
 
-	fmt.Printf("\n--- Message Details for Folder: %s ---\n", folderName)
-	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	_, _ = fmt.Fprintf(out, "\n--- Message Details for Folder: %s ---\n", folderName)
+	w := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
 	if _, err := fmt.Fprintln(w, "From\tTo\tDate\tSubject\tAttachments\tTotal Size (KB)\t"); err != nil {
 		log.Warnf("Error writing to tabwriter: %v", err)
 	}
@@ -100,7 +115,7 @@ func RunMessageDetailsMode(ctx context.Context, client o365client.O365ClientInte
 	if err := w.Flush(); err != nil {
 		log.Warnf("Error flushing tabwriter: %v", err)
 	}
-	fmt.Println("-------------------------------------------------")
+	_, _ = fmt.Fprintln(out, "-------------------------------------------------")
 
 	// Check for errors from the goroutine
 	if err := <-errChan; err != nil {

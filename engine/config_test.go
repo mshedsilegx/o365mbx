@@ -1,3 +1,7 @@
+// Package engine implements the core business logic and orchestrates the parallelized
+// email download and processing pipeline.
+//
+// This file contains unit tests for configuration validation logic.
 package engine
 
 import (
@@ -19,7 +23,6 @@ func TestConfig_SetDefaults(t *testing.T) {
 	assert.Equal(t, 10, c.MaxParallelDownloads)
 	assert.Equal(t, 5.0, c.APICallsPerSecond)
 	assert.Equal(t, 10, c.APIBurst)
-	assert.Equal(t, 100, c.StateSaveInterval)
 	assert.Equal(t, 0.0, c.BandwidthLimitMBs)
 	assert.Equal(t, "full", c.ProcessingMode)
 	assert.Equal(t, "Processed", c.ProcessedFolder)
@@ -48,7 +51,7 @@ func TestConfig_Validate(t *testing.T) {
 		{
 			name: "Negative timeout",
 			config: func() *Config {
-				c := &Config{HTTPClientTimeoutSeconds: -1, MsgHandler: "raw", AttachmentExtractionL1: "default", LargeAttachmentThresholdMB: 20, ChunkSizeMB: 8, MaxParallelDownloads: 10, APICallsPerSecond: 5.0, StateSaveInterval: 100}
+				c := &Config{MaxExecutionTimeMsg: 120, HTTPClientTimeoutSeconds: -1, MsgHandler: "raw", AttachmentExtractionL1: "default", LargeAttachmentThresholdMB: 20, ChunkSizeMB: 8, MaxParallelDownloads: 10, APICallsPerSecond: 5.0}
 				return c
 			},
 			wantErr: true,
@@ -57,7 +60,7 @@ func TestConfig_Validate(t *testing.T) {
 		{
 			name: "Negative retries",
 			config: func() *Config {
-				c := &Config{HTTPClientTimeoutSeconds: 120, MaxRetries: -1, MsgHandler: "raw", AttachmentExtractionL1: "default", LargeAttachmentThresholdMB: 20, ChunkSizeMB: 8, MaxParallelDownloads: 10, APICallsPerSecond: 5.0, StateSaveInterval: 100}
+				c := &Config{MaxExecutionTimeMsg: 120, HTTPClientTimeoutSeconds: 120, MaxRetries: -1, MsgHandler: "raw", AttachmentExtractionL1: "default", LargeAttachmentThresholdMB: 20, ChunkSizeMB: 8, MaxParallelDownloads: 10, APICallsPerSecond: 5.0}
 				return c
 			},
 			wantErr: true,
@@ -66,7 +69,7 @@ func TestConfig_Validate(t *testing.T) {
 		{
 			name: "Negative backoff",
 			config: func() *Config {
-				c := &Config{HTTPClientTimeoutSeconds: 120, InitialBackoffSeconds: -1, MsgHandler: "raw", AttachmentExtractionL1: "default", LargeAttachmentThresholdMB: 20, ChunkSizeMB: 8, MaxParallelDownloads: 10, APICallsPerSecond: 5.0, StateSaveInterval: 100}
+				c := &Config{MaxExecutionTimeMsg: 120, HTTPClientTimeoutSeconds: 120, InitialBackoffSeconds: -1, MsgHandler: "raw", AttachmentExtractionL1: "default", LargeAttachmentThresholdMB: 20, ChunkSizeMB: 8, MaxParallelDownloads: 10, APICallsPerSecond: 5.0}
 				return c
 			},
 			wantErr: true,
@@ -75,7 +78,7 @@ func TestConfig_Validate(t *testing.T) {
 		{
 			name: "Zero attachment threshold",
 			config: func() *Config {
-				c := &Config{HTTPClientTimeoutSeconds: 120, LargeAttachmentThresholdMB: 0, MsgHandler: "raw", AttachmentExtractionL1: "default", ChunkSizeMB: 8, MaxParallelDownloads: 10, APICallsPerSecond: 5.0, StateSaveInterval: 100}
+				c := &Config{MaxExecutionTimeMsg: 120, HTTPClientTimeoutSeconds: 120, LargeAttachmentThresholdMB: 0, MsgHandler: "raw", AttachmentExtractionL1: "default", ChunkSizeMB: 8, MaxParallelDownloads: 10, APICallsPerSecond: 5.0}
 				return c
 			},
 			wantErr: true,
@@ -84,7 +87,7 @@ func TestConfig_Validate(t *testing.T) {
 		{
 			name: "Zero chunk size",
 			config: func() *Config {
-				c := &Config{HTTPClientTimeoutSeconds: 120, LargeAttachmentThresholdMB: 20, ChunkSizeMB: 0, MsgHandler: "raw", AttachmentExtractionL1: "default", MaxParallelDownloads: 10, APICallsPerSecond: 5.0, StateSaveInterval: 100}
+				c := &Config{MaxExecutionTimeMsg: 120, HTTPClientTimeoutSeconds: 120, LargeAttachmentThresholdMB: 20, ChunkSizeMB: 0, MsgHandler: "raw", AttachmentExtractionL1: "default", MaxParallelDownloads: 10, APICallsPerSecond: 5.0}
 				return c
 			},
 			wantErr: true,
@@ -93,7 +96,7 @@ func TestConfig_Validate(t *testing.T) {
 		{
 			name: "Chunk size greater than threshold",
 			config: func() *Config {
-				c := &Config{HTTPClientTimeoutSeconds: 120, LargeAttachmentThresholdMB: 10, ChunkSizeMB: 20, MsgHandler: "raw", AttachmentExtractionL1: "default", MaxParallelDownloads: 10, APICallsPerSecond: 5.0, StateSaveInterval: 100}
+				c := &Config{MaxExecutionTimeMsg: 120, HTTPClientTimeoutSeconds: 120, LargeAttachmentThresholdMB: 10, ChunkSizeMB: 20, MsgHandler: "raw", AttachmentExtractionL1: "default", MaxParallelDownloads: 10, APICallsPerSecond: 5.0}
 				return c
 			},
 			wantErr: true,
@@ -102,7 +105,7 @@ func TestConfig_Validate(t *testing.T) {
 		{
 			name: "Negative parallel downloads",
 			config: func() *Config {
-				c := &Config{HTTPClientTimeoutSeconds: 120, LargeAttachmentThresholdMB: 20, ChunkSizeMB: 8, MaxParallelDownloads: 0, MsgHandler: "raw", AttachmentExtractionL1: "default", APICallsPerSecond: 5.0, StateSaveInterval: 100}
+				c := &Config{MaxExecutionTimeMsg: 120, HTTPClientTimeoutSeconds: 120, LargeAttachmentThresholdMB: 20, ChunkSizeMB: 8, MaxParallelDownloads: 0, MsgHandler: "raw", AttachmentExtractionL1: "default", APICallsPerSecond: 5.0}
 				return c
 			},
 			wantErr: true,
@@ -111,7 +114,7 @@ func TestConfig_Validate(t *testing.T) {
 		{
 			name: "Zero API rate",
 			config: func() *Config {
-				c := &Config{HTTPClientTimeoutSeconds: 120, LargeAttachmentThresholdMB: 20, ChunkSizeMB: 8, MaxParallelDownloads: 10, APICallsPerSecond: 0, MsgHandler: "raw", AttachmentExtractionL1: "default", StateSaveInterval: 100}
+				c := &Config{MaxExecutionTimeMsg: 120, HTTPClientTimeoutSeconds: 120, LargeAttachmentThresholdMB: 20, ChunkSizeMB: 8, MaxParallelDownloads: 10, APICallsPerSecond: 0, MsgHandler: "raw", AttachmentExtractionL1: "default"}
 				return c
 			},
 			wantErr: true,
@@ -120,25 +123,16 @@ func TestConfig_Validate(t *testing.T) {
 		{
 			name: "Negative API burst",
 			config: func() *Config {
-				c := &Config{HTTPClientTimeoutSeconds: 120, LargeAttachmentThresholdMB: 20, ChunkSizeMB: 8, MaxParallelDownloads: 10, APICallsPerSecond: 5.0, APIBurst: -1, MsgHandler: "raw", AttachmentExtractionL1: "default", StateSaveInterval: 100}
+				c := &Config{MaxExecutionTimeMsg: 120, HTTPClientTimeoutSeconds: 120, LargeAttachmentThresholdMB: 20, ChunkSizeMB: 8, MaxParallelDownloads: 10, APICallsPerSecond: 5.0, APIBurst: -1, MsgHandler: "raw", AttachmentExtractionL1: "default"}
 				return c
 			},
 			wantErr: true,
 			msg:     "apiBurst cannot be negative",
 		},
 		{
-			name: "Zero state save interval",
-			config: func() *Config {
-				c := &Config{HTTPClientTimeoutSeconds: 120, LargeAttachmentThresholdMB: 20, ChunkSizeMB: 8, MaxParallelDownloads: 10, APICallsPerSecond: 5.0, StateSaveInterval: 0, MsgHandler: "raw", AttachmentExtractionL1: "default"}
-				return c
-			},
-			wantErr: true,
-			msg:     "stateSaveInterval must be positive",
-		},
-		{
 			name: "Negative bandwidth limit",
 			config: func() *Config {
-				c := &Config{HTTPClientTimeoutSeconds: 120, LargeAttachmentThresholdMB: 20, ChunkSizeMB: 8, MaxParallelDownloads: 10, APICallsPerSecond: 5.0, StateSaveInterval: 100, BandwidthLimitMBs: -1, MsgHandler: "raw", AttachmentExtractionL1: "default"}
+				c := &Config{MaxExecutionTimeMsg: 120, HTTPClientTimeoutSeconds: 120, LargeAttachmentThresholdMB: 20, ChunkSizeMB: 8, MaxParallelDownloads: 10, APICallsPerSecond: 5.0, BandwidthLimitMBs: -1, MsgHandler: "raw", AttachmentExtractionL1: "default"}
 				return c
 			},
 			wantErr: true,
@@ -147,7 +141,7 @@ func TestConfig_Validate(t *testing.T) {
 		{
 			name: "Invalid convert body",
 			config: func() *Config {
-				c := &Config{HTTPClientTimeoutSeconds: 120, LargeAttachmentThresholdMB: 20, ChunkSizeMB: 8, MaxParallelDownloads: 10, APICallsPerSecond: 5.0, StateSaveInterval: 100, ConvertBody: "invalid", MsgHandler: "raw", AttachmentExtractionL1: "default"}
+				c := &Config{MaxExecutionTimeMsg: 120, HTTPClientTimeoutSeconds: 120, LargeAttachmentThresholdMB: 20, ChunkSizeMB: 8, MaxParallelDownloads: 10, APICallsPerSecond: 5.0, ConvertBody: "invalid", MsgHandler: "raw", AttachmentExtractionL1: "default"}
 				return c
 			},
 			wantErr: true,
@@ -156,7 +150,7 @@ func TestConfig_Validate(t *testing.T) {
 		{
 			name: "Invalid msg handler",
 			config: func() *Config {
-				c := &Config{HTTPClientTimeoutSeconds: 120, LargeAttachmentThresholdMB: 20, ChunkSizeMB: 8, MaxParallelDownloads: 10, APICallsPerSecond: 5.0, StateSaveInterval: 100, ConvertBody: "none", MsgHandler: "invalid", AttachmentExtractionL1: "default"}
+				c := &Config{MaxExecutionTimeMsg: 120, HTTPClientTimeoutSeconds: 120, LargeAttachmentThresholdMB: 20, ChunkSizeMB: 8, MaxParallelDownloads: 10, APICallsPerSecond: 5.0, ConvertBody: "none", MsgHandler: "invalid", AttachmentExtractionL1: "default"}
 				return c
 			},
 			wantErr: true,
@@ -165,7 +159,7 @@ func TestConfig_Validate(t *testing.T) {
 		{
 			name: "PDF mode without chromium path",
 			config: func() *Config {
-				c := &Config{HTTPClientTimeoutSeconds: 120, LargeAttachmentThresholdMB: 20, ChunkSizeMB: 8, MaxParallelDownloads: 10, APICallsPerSecond: 5.0, StateSaveInterval: 100, ConvertBody: "pdf", MsgHandler: "raw", AttachmentExtractionL1: "default"}
+				c := &Config{MaxExecutionTimeMsg: 120, HTTPClientTimeoutSeconds: 120, LargeAttachmentThresholdMB: 20, ChunkSizeMB: 8, MaxParallelDownloads: 10, APICallsPerSecond: 5.0, ConvertBody: "pdf", MsgHandler: "raw", AttachmentExtractionL1: "default"}
 				return c
 			},
 			wantErr: true,
@@ -199,12 +193,12 @@ func TestConfig_ValidateChromiumPath(t *testing.T) {
 	_ = tmpFile.Close()
 
 	c := &Config{
+		MaxExecutionTimeMsg:        120,
 		HTTPClientTimeoutSeconds:   120,
 		LargeAttachmentThresholdMB: 20,
 		ChunkSizeMB:                8,
 		MaxParallelDownloads:       10,
 		APICallsPerSecond:          5.0,
-		StateSaveInterval:          100,
 		ConvertBody:                "pdf",
 		ChromiumPath:               tmpFile.Name(),
 		MsgHandler:                 "raw",

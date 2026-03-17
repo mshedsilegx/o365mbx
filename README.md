@@ -17,11 +17,9 @@ It is designed for high-performance, parallelized downloading and is robust and 
 *   **Bandwidth Limiting**: Allows throttling of download bandwidth to avoid hitting data egress limits on large-scale downloads.
 *   **Secure Token Management**: Provides multiple, mutually exclusive options for securely supplying the access token.
 *   **Health Check Mode**: Provides a "health check" mode to verify connectivity and authentication with the O365 mailbox without performing a full download.
+*   **Per-Message Execution Timeout**: Implements a configurable timeout for processing individual email messages. This prevents the application from hanging on exceptionally large or complex emails (e.g., those with massive HTML bodies or deeply nested structures). If a message exceeds the timeout, it is automatically moved to the error folder, allowing the pipeline to continue with the next item.
 *   **Structured Logging**: Uses `logrus` for structured and informative logging, with a configurable debug level.
-*   **Advanced PDF Conversion Control**: For users converting emails to PDF, the application provides a `-rod` flag. This flag allows passing launch arguments directly to the underlying `go-rod` headless browser instance. For example, to use a proxy, you could pass `-rod="--proxy-server=127.0.0.1:8080"`. This provides fine-grained control over the browser environment used for conversion.
 *   **Comprehensive Error Reporting and Job Tracking**: Generates detailed job-level and message-level JSON reports to facilitate downstream processing and error reconciliation.
-
-    > **Security Warning:** The `-rod` flag passes arguments directly to the underlying browser engine. Use this feature with caution and only with trusted arguments to avoid potential command injection vulnerabilities.
 
 ## System Requirements
 
@@ -214,7 +212,6 @@ All configuration options can be controlled via command-line arguments. Any flag
 | `-processing-mode`              | Processing mode: `full`, `incremental`, or `route`.                       | No       | `full`  |
 | `-inbox-folder`                 | The source folder from which to process messages.                         | No       | `Inbox` |
 | `-state`                        | Path to the state file for incremental processing.                        | No       |         |
-| `-state-save-interval`          | Save state every N messages during a run.                                 | No       | `100`   |
 | `-processed-folder`             | Destination folder for successful messages in `route` mode.               | No       | `Processed`|
 | `-error-folder`                 | Destination folder for failed messages in `route` mode.                   | No       | `Error` |
 | **Email Body Conversion**       |                                                                           |          |         |
@@ -229,6 +226,7 @@ All configuration options can be controlled via command-line arguments. Any flag
 | `-api-burst`                    | API burst capacity for client-side rate limiting.                         | No       | `10`    |
 | `-max-retries`                  | Maximum number of retries for failed API calls.                           | No       | `2`     |
 | `-initial-backoff-seconds`      | Initial backoff in seconds for retries.                                   | No       | `5`     |
+| `-max-execution-time-msg`       | Maximum time in seconds to spend on one email message.                    | No       | `120`   |
 | `-bandwidth-limit-mbs`          | Bandwidth limit in MB/s for downloads (0 for disabled).                   | No       | `0.0`   |
 | `-large-attachment-threshold-mb` | Threshold in MB for what is considered a large attachment.                | No       | `20`    |
 | `-chunk-size-mb`                | Chunk size in MB for downloading large attachments.                       | No       | `8`     |
@@ -255,13 +253,15 @@ For a more permanent setup, you can use a JSON file (e.g., `config.json`) and pa
   "httpClientTimeoutSeconds": 120,
   "maxRetries": 2,
   "initialBackoffSeconds": 5,
+  "maxExecutionTimeMsg": 120,
   "maxParallelDownloads": 10,
   "apiCallsPerSecond": 5.0,
   "apiBurst": 10,
-  "stateSaveInterval": 100,
   "bandwidthLimitMBs": 0.0,
   "largeAttachmentThresholdMB": 20,
   "chunkSizeMB": 8,
+  "convertBody": "none",
+  "chromiumPath": "",
   "msgHandler": "extractor",
   "attachmentExtractionL1": "default"
 }
@@ -285,13 +285,13 @@ For a more permanent setup, you can use a JSON file (e.g., `config.json`) and pa
     *   `processingMode`: (String) `full`, `incremental`, or `route`. In `route` mode, messages are moved after processing.
     *   `inboxFolder`: (String) The source folder to process messages from. Defaults to the main `Inbox`.
     *   `stateFilePath`: (String) Absolute path to the state file for incremental mode.
-    *   `stateSaveInterval`: (Integer) How often to save the state file during a run (number of messages).
     *   `processedFolder`: (String) The destination folder for successfully processed messages in `route` mode.
     *   `errorFolder`: (String) The destination folder for messages that failed processing in `route` mode.
 *   **Performance & Limits**:
     *   `httpClientTimeoutSeconds`: (Integer) Timeout in seconds for HTTP requests.
     *   `maxRetries`: (Integer) The maximum number of retries for failed API calls.
     *   `initialBackoffSeconds`: (Integer) The initial backoff in seconds for retries.
+    *   `maxExecutionTimeMsg`: (Integer) The maximum time in seconds to spend processing a single email message before timing out and moving it to the error folder. Defaults to `120`.
     *   `maxParallelDownloads`: (Integer) The maximum number of concurrent workers.
     *   `apiCallsPerSecond`: (Float) The number of API calls allowed per second.
     *   `apiBurst`: (Integer) The burst capacity for the API rate limiter.
@@ -405,7 +405,19 @@ This example throttles the total download speed to 50 MB/s to avoid hitting API 
     -bandwidth-limit-mbs 50.0
 ```
 
-### 8. Body Conversion to Plain Text
+### 8. Custom Message Timeout
+
+This example sets a shorter timeout of 30 seconds for processing each message, which is useful for rapid processing of small emails or when running in environments with strict time constraints.
+
+```shell
+./o365mbx \
+    -mailbox "user@example.com" \
+    -workspace "/path/to/your/output" \
+    -token-env \
+    -max-execution-time-msg 30
+```
+
+### 9. Body Conversion to Plain Text
 
 This example downloads all emails and converts their bodies from HTML to plain text.
 
@@ -417,7 +429,7 @@ This example downloads all emails and converts their bodies from HTML to plain t
     -convert-body text
 ```
 
-### 9. Health Check Examples
+### 10. Health Check Examples
 
 The `-healthcheck` flag provides powerful, read-only tools to inspect the mailbox without downloading any items.
 
@@ -482,7 +494,19 @@ marketing@company.com user@example.com        2024-07-31 16:00    Weekly Newslet
 -------------------------------------------------
 ```
 
-### 10. Complex Email Extraction
+### 11. Message Processing Timeout
+
+This example sets a custom timeout of 60 seconds for processing each individual email message. If a message (including its body conversion and all attachments) takes longer than this, it is cancelled and moved to the error folder.
+
+```shell
+./o365mbx \
+    -mailbox "user@example.com" \
+    -workspace "/path/to/your/output" \
+    -token-env \
+    -max-execution-time-msg 60
+```
+
+### 12. Complex Email Extraction
 
 This example downloads all emails and, for any attached `.msg` or `.eml` files, extracts their body and immediate attachments.
 
@@ -494,7 +518,7 @@ This example downloads all emails and, for any attached `.msg` or `.eml` files, 
     -msg-handler extractor
 ```
 
-### 11. Raw Email Download
+### 13. Raw Email Download
 
 This example ensures that attached emails are saved as-is without any extraction (default behavior).
 

@@ -13,22 +13,22 @@ The application is structured into several modular Go packages, each with distin
     Contains the core business logic and orchestrates the entire email download process. It implements a highly parallelized producer-consumer architecture, manages concurrency using goroutines and channels, and tracks the overall state and statistics of the download run. It also includes logic for incremental processing and message routing.
 
 3.  **`o365client` package:**
-    Responsible for all interactions with the Microsoft Graph API. It handles constructing and executing HTTP requests, implements robust retry mechanisms with exponential backoff and client-side rate limiting, and parses API responses into Go-native data structures (`Message`, `Attachment`, etc.). It also manages folder creation and message movement within O365.
+    Responsible for all interactions with the Microsoft Graph API. It handles constructing and executing HTTP requests, implements robust retry mechanisms with exponential backoff and client-side rate limiting, and parses API responses into Go-native data structures (`Message`, `Attachment`, etc.). It also manages folder creation and message movement within O365, and provides diagnostic health check statistics including folder-level item counts and storage sizes.
 
 4.  **`filehandler` package:**
-    Manages all local file system operations. This includes creating the unique workspace directory, saving processed email bodies and attachments, persisting the application's run state for incremental downloads, and writing metadata files. It incorporates security measures like filename sanitization and workspace path validation.
+    Manages all local file system operations. This includes creating the unique workspace directory, saving processed email bodies and attachments, persisting the application's run state for incremental downloads, and writing metadata files. It incorporates security measures like filename sanitization, workspace path validation, and total path length checks. For secure file operations within the workspace, it uses Go 1.24+ `os.OpenRoot` to mitigate directory traversal and TOCTOU vulnerabilities.
 
 5.  **`emailprocessor` package:**
-    Focuses on transforming email body content. Its primary function is to convert HTML email bodies into clean plain text or PDF format, ensuring that the stored email content is easily readable and searchable.
+    Focuses on transforming email body content. Its primary function is to convert HTML email bodies into clean plain text or PDF format. It uses a high-performance PDF conversion pipeline featuring a browser singleton and page pool for efficient resource management.
 
 6.  **`apperrors` package:**
-    Defines custom error types (`AuthError`, `APIError`, `FileSystemError`) used throughout the application. This provides a structured way to categorize and handle different classes of errors, leading to clearer logging and more precise error recovery strategies.
+    Defines custom error types (`APIError`, `FileSystemError`) and sentinel errors (like `ErrMissingDeltaLink`) used throughout the application. This provides a structured way to categorize and handle different classes of errors, leading to clearer logging and more precise error recovery strategies.
 
 ## Key Design Principles:
 
 *   **Modularity:** Clear separation of concerns across packages for better organization and testability.
 *   **Resilience:** Robust error handling, retry mechanisms, and rate limiting to withstand transient failures and API throttling.
-*   **Performance:** Leverages Go's concurrency features for efficient, parallel processing and optimized data transfer (e.g., chunked downloads).
+*   **Performance:** Leverages Go's concurrency features for efficient, parallel processing and optimized data transfer using streaming I/O.
 *   **Configurability:** Flexible configuration options via command-line flags and JSON files, allowing users to tailor behavior without code changes.
 *   **Security:** Proactive measures for safe file system interactions, including workspace validation and filename sanitization.
 
@@ -52,11 +52,23 @@ The application employs a sophisticated producer-consumer pattern using Go's gor
 
 *   **Semaphore (`chan struct{}`):** Implemented as a buffered channel, this mechanism limits the total number of concurrent processor and downloader goroutines actively working, preventing resource exhaustion and allowing fine-grained control over parallelism.
 
+## High-Performance PDF Conversion
+
+The application implements an optimized pipeline for HTML-to-PDF conversion, following production-grade best practices for the `go-rod` library:
+
+*   **Browser Singleton**: A single Chromium instance is launched at startup and shared across the entire application lifecycle, eliminating the heavy overhead of repeated process creation.
+*   **Page Pool**: A managed pool of browser pages (tabs) limits concurrent rendering tasks, preventing CPU and memory spikes while maximizing resource utilization.
+*   **Session Isolation**: Every render occurs in a fresh incognito context to prevent session pollution, CSS leaks, or cookie persistence between different emails.
+*   **Memory Management (Recycling)**: To prevent long-term memory creep typical of Chromium, the browser instance is automatically recycled after every 1,000 conversions.
+*   **Asset Synchronization**: The system uses `SetDocumentContent` combined with `WaitIdle` to ensure all external assets (images, styles) are fully loaded before capturing the PDF.
+
 ## Robustness and Error Handling:
 
 The application is designed to be highly resilient against network issues, API limitations, and file system errors.
 
-*   **Custom Error Types:** The `apperrors` package defines custom error types like `APIError`, `FileSystemError`, and `ErrMissingDeltaLink`. These types allow the application to distinguish between different error sources, enabling more specific logging, user feedback, and programmatic error handling.
+*   **Per-Message Execution Timeout**: A `context.WithTimeout` is applied to each message in the processor pool. This ensures that a single problematic email (e.g., massive HTML or recursive attachments) cannot block a worker indefinitely. If the timeout is reached, the message's context is cancelled, and the aggregator routes it to the "Error" folder.
+
+*   **Custom Error Types:** The `apperrors` package defines custom error types like `APIError`, `FileSystemError`, and `ErrMissingDeltaLink`. these types allow the application to distinguish between different error sources, enabling more specific logging, user feedback, and programmatic error handling.
 
 *   **Built-in Retry Mechanism:** The application leverages the Microsoft Graph SDK's built-in retry middleware. This automatically retries failed requests (e.g., due to network glitches or server-side errors like HTTP 5xx) using an exponential backoff strategy. The number of retries and backoff duration are configurable.
 
@@ -68,7 +80,7 @@ The application is designed to be highly resilient against network issues, API l
 
 *   **Graceful Shutdown and State Logging:** Upon shutdown, the application logs any messages that were still in the processing pipeline. This provides visibility into incomplete work and prevents silent data loss.
 
-*   **Workspace Validation and Security:** The `filehandler` package includes robust validation for the `workspacePath`. It ensures the path is absolute, prevents the use of critical system directories, and checks that the workspace is a legitimate directory (not a symbolic link). Filenames are sanitized to prevent path traversal attacks, and total path length is checked to avoid filesystem errors.
+*   **Workspace Validation and Security:** The `filehandler` package includes robust validation for the `workspacePath`. It ensures the path is absolute, prevents the use of critical system directories, and checks that the workspace is a legitimate directory (not a symbolic link). Filenames are sanitized to prevent path traversal attacks, and total path length is checked to avoid filesystem errors. For secure file operations within the workspace, it uses Go 1.24+ `os.OpenRoot` to mitigate directory traversal and TOCTOU vulnerabilities.
 
 *   **Bandwidth Limiting:** An optional `bandwidthLimiter` in `filehandler` allows users to cap the download speed of attachments, which can be useful in environments with limited network capacity.
 

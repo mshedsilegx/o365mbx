@@ -1,3 +1,14 @@
+// Package engine implements the core business logic and orchestrates the parallelized
+// email download and processing pipeline.
+//
+// OBJECTIVE:
+// This package defines the application's configuration schema, defaults, and validation
+// rules. It ensures that the engine operates within safe and predictable parameters.
+//
+// CORE SECTIONS:
+// 1. Config Structure: Maps JSON configuration and CLI flags to internal application settings.
+// 2. Default Values: Provides sensible defaults for optional settings.
+// 3. Validation Logic: Enforces constraints on settings like paths, counts, and intervals.
 package engine
 
 import (
@@ -27,6 +38,7 @@ type Config struct {
 	ErrorFolder          string `json:"errorFolder,omitempty"`
 	HealthCheck          bool   `json:"healthcheck,omitempty"`
 	MessageDetailsFolder string `json:"messageDetailsFolder,omitempty"`
+	MaxExecutionTimeMsg  int    `json:"maxExecutionTimeMsg,omitempty"`
 
 	// HTTP and API settings
 	HTTPClientTimeoutSeconds int     `json:"httpClientTimeoutSeconds"`
@@ -41,9 +53,6 @@ type Config struct {
 	ChunkSizeMB                int     `json:"chunkSizeMB"`
 	BandwidthLimitMBs          float64 `json:"bandwidthLimitMBs"`
 
-	// State settings
-	StateSaveInterval int `json:"stateSaveInterval"`
-
 	// Conversion settings
 	ConvertBody  string `json:"convertBody,omitempty"`
 	ChromiumPath string `json:"chromiumPath,omitempty"`
@@ -55,6 +64,9 @@ type Config struct {
 
 // SetDefaults populates the configuration with sensible default values.
 func (c *Config) SetDefaults() {
+	if c.MaxExecutionTimeMsg == 0 {
+		c.MaxExecutionTimeMsg = 120 // Default: 120 seconds per email message
+	}
 	if c.HTTPClientTimeoutSeconds == 0 {
 		c.HTTPClientTimeoutSeconds = 120
 	}
@@ -78,9 +90,6 @@ func (c *Config) SetDefaults() {
 	}
 	if c.APIBurst == 0 {
 		c.APIBurst = 10 // Default: burst of 10 calls
-	}
-	if c.StateSaveInterval == 0 {
-		c.StateSaveInterval = 100 // Default: save state every 100 messages
 	}
 	if c.BandwidthLimitMBs == 0 {
 		c.BandwidthLimitMBs = 0 // Default: 0 means disabled
@@ -111,6 +120,9 @@ func (c *Config) SetDefaults() {
 // Validate ensures all configuration parameters are within acceptable ranges
 // and logically consistent.
 func (c *Config) Validate() error {
+	if c.MaxExecutionTimeMsg <= 0 {
+		return fmt.Errorf("maxExecutionTimeMsg must be positive")
+	}
 	if c.HTTPClientTimeoutSeconds <= 0 {
 		return fmt.Errorf("httpClientTimeoutSeconds must be positive")
 	}
@@ -134,9 +146,6 @@ func (c *Config) Validate() error {
 	}
 	if c.APIBurst < 0 {
 		return fmt.Errorf("apiBurst cannot be negative")
-	}
-	if c.StateSaveInterval <= 0 {
-		return fmt.Errorf("stateSaveInterval must be positive")
 	}
 	if c.BandwidthLimitMBs < 0 {
 		return fmt.Errorf("bandwidthLimitMBs cannot be negative")

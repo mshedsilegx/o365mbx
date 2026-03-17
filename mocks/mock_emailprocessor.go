@@ -10,6 +10,7 @@
 package mocks
 
 import (
+	context "context"
 	reflect "reflect"
 
 	gomock "go.uber.org/mock/gomock"
@@ -39,6 +40,34 @@ func (m *MockEmailProcessorInterface) EXPECT() *MockEmailProcessorInterfaceMockR
 	return m.recorder
 }
 
+// Close mocks base method.
+func (m *MockEmailProcessorInterface) Close() error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Close")
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// Close indicates an expected call of Close.
+func (mr *MockEmailProcessorInterfaceMockRecorder) Close() *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Close", reflect.TypeOf((*MockEmailProcessorInterface)(nil).Close))
+}
+
+// Initialize mocks base method.
+func (m *MockEmailProcessorInterface) Initialize(ctx context.Context, chromiumPath string, poolSize int) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Initialize", ctx, chromiumPath, poolSize)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// Initialize indicates an expected call of Initialize.
+func (mr *MockEmailProcessorInterfaceMockRecorder) Initialize(ctx, chromiumPath, poolSize any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Initialize", reflect.TypeOf((*MockEmailProcessorInterface)(nil).Initialize), ctx, chromiumPath, poolSize)
+}
+
 // IsHTML mocks base method.
 func (m *MockEmailProcessorInterface) IsHTML(content string) bool {
 	m.ctrl.T.Helper()
@@ -54,16 +83,16 @@ func (mr *MockEmailProcessorInterfaceMockRecorder) IsHTML(content any) *gomock.C
 }
 
 // ProcessBody mocks base method.
-func (m *MockEmailProcessorInterface) ProcessBody(htmlContent, convertBody, chromiumPath string) (any, error) {
+func (m *MockEmailProcessorInterface) ProcessBody(ctx context.Context, htmlContent, convertBody string) (any, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "ProcessBody", htmlContent, convertBody, chromiumPath)
+	ret := m.ctrl.Call(m, "ProcessBody", ctx, htmlContent, convertBody)
 	ret0, _ := ret[0].(any)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // ProcessBody indicates an expected call of ProcessBody.
-func (mr *MockEmailProcessorInterfaceMockRecorder) ProcessBody(htmlContent, convertBody, chromiumPath any) *gomock.Call {
+func (mr *MockEmailProcessorInterfaceMockRecorder) ProcessBody(ctx, htmlContent, convertBody any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ProcessBody", reflect.TypeOf((*MockEmailProcessorInterface)(nil).ProcessBody), htmlContent, convertBody, chromiumPath)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ProcessBody", reflect.TypeOf((*MockEmailProcessorInterface)(nil).ProcessBody), ctx, htmlContent, convertBody)
 }

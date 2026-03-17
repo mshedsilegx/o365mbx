@@ -1,3 +1,6 @@
+// Package main is the entry point for the o365mbx application.
+//
+// This file contains unit and integration tests for the CLI and configuration logic.
 package main
 
 import (
@@ -191,7 +194,6 @@ func TestOverrideConfigWithFlags(t *testing.T) {
 	backoff := fs.Int("initial-backoff-seconds", 5, "")
 	chunk := fs.Int("chunk-size-mb", 8, "")
 	large := fs.Int("large-attachment-threshold-mb", 20, "")
-	saveInt := fs.Int("state-save-interval", 100, "")
 	band := fs.Float64("bandwidth-limit-mbs", 0, "")
 	convert := fs.String("convert-body", "none", "")
 	chromium := fs.String("chromium-path", "", "")
@@ -199,8 +201,11 @@ func TestOverrideConfigWithFlags(t *testing.T) {
 	extL1 := fs.String("attachment-extraction-l1", "default", "")
 	health := fs.Bool("healthcheck", false, "")
 	details := fs.String("message-details", "", "")
+	maxExec := fs.Int("max-execution-time-msg", 120, "")
 
 	dummyStr := ""
+	cfg := &engine.Config{}
+	cfg.SetDefaults()
 
 	// Set ALL flags
 	_ = fs.Parse([]string{
@@ -224,7 +229,6 @@ func TestOverrideConfigWithFlags(t *testing.T) {
 		"-initial-backoff-seconds", "4",
 		"-chunk-size-mb", "1",
 		"-large-attachment-threshold-mb", "2",
-		"-state-save-interval", "50",
 		"-bandwidth-limit-mbs", "0.5",
 		"-convert-body", "text",
 		"-chromium-path", "cp",
@@ -232,15 +236,10 @@ func TestOverrideConfigWithFlags(t *testing.T) {
 		"-attachment-extraction-l1", "inlines",
 		"-healthcheck",
 		"-message-details", "md",
+		"-max-execution-time-msg", "60",
 	})
 
-	cfg := &engine.Config{}
-
-	origCommandLine := flag.CommandLine
-	defer func() { flag.CommandLine = origCommandLine }()
-	flag.CommandLine = fs
-
-	overrideConfigWithFlagsLocal(cfg, fs, &dummyStr, tokenString, tokenFile, tokenEnv, removeTokenFile, mailbox, workspace, debug, mode, inbox, state, processed, errorF, timeout, parallel, apiRate, apiBurst, retries, backoff, chunk, large, saveInt, band, convert, chromium, msgH, extL1, health, details)
+	overrideConfigWithFlagsLocal(cfg, fs, &dummyStr, tokenString, tokenFile, tokenEnv, removeTokenFile, mailbox, workspace, debug, mode, inbox, state, processed, errorF, timeout, parallel, apiRate, apiBurst, retries, backoff, chunk, large, band, convert, chromium, msgH, extL1, health, details, maxExec)
 
 	assert.Equal(t, "ts", cfg.TokenString)
 	assert.Equal(t, "tf", cfg.TokenFile)
@@ -262,7 +261,6 @@ func TestOverrideConfigWithFlags(t *testing.T) {
 	assert.Equal(t, 4, cfg.InitialBackoffSeconds)
 	assert.Equal(t, 1, cfg.ChunkSizeMB)
 	assert.Equal(t, 2, cfg.LargeAttachmentThresholdMB)
-	assert.Equal(t, 50, cfg.StateSaveInterval)
 	assert.Equal(t, 0.5, cfg.BandwidthLimitMBs)
 	assert.Equal(t, "text", cfg.ConvertBody)
 	assert.Equal(t, "cp", cfg.ChromiumPath)
@@ -270,6 +268,7 @@ func TestOverrideConfigWithFlags(t *testing.T) {
 	assert.Equal(t, "inlines", cfg.AttachmentExtractionL1)
 	assert.True(t, cfg.HealthCheck)
 	assert.Equal(t, "md", cfg.MessageDetailsFolder)
+	assert.Equal(t, 60, cfg.MaxExecutionTimeMsg)
 }
 
 func TestCheckLongPathSupportMock(t *testing.T) {
@@ -310,6 +309,11 @@ func TestRun(t *testing.T) {
 			args:    []string{"o365mbx", "-mailbox", "invalid", "-token-string", "t", "-workspace", "w"},
 			wantErr: true,
 		},
+		{
+			name:    "Healthcheck mode",
+			args:    []string{"o365mbx", "-mailbox", "test@test.com", "-token-string", "t", "-healthcheck"},
+			wantErr: true, // Will fail because it tries to create a client with a dummy token
+		},
 	}
 
 	for _, tt := range tests {
@@ -322,4 +326,20 @@ func TestRun(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestRun_TokenFileRemoval(t *testing.T) {
+	tokenFile := "temp-token-removal.txt"
+	_ = os.WriteFile(tokenFile, []byte("test-token"), 0644)
+	// We don't defer removal here because we want to test if run() removes it
+
+	args := []string{"o365mbx", "-mailbox", "test@test.com", "-token-file", tokenFile, "-remove-token-file", "-workspace", "test-wp"}
+
+	// This will fail at client creation, but the defer for token removal should still run if it reached that point.
+	// Actually, loadAccessToken is called before client creation.
+	// Let's check main.go flow.
+	_ = run(args, io.Discard)
+
+	_, err := os.Stat(tokenFile)
+	assert.True(t, os.IsNotExist(err), "Token file should have been removed")
 }

@@ -1,3 +1,13 @@
+// Package o365client handles all interactions with the Microsoft Graph API,
+// including message retrieval, attachment streaming, and mailbox management.
+//
+// OBJECTIVE:
+// This package implements the authentication provider for the Microsoft Graph SDK.
+// It manages the injection of bearer tokens into outgoing API requests.
+//
+// CORE FUNCTIONALITY:
+// 1. Token Injection: Adds the "Authorization: Bearer <token>" header to all requests.
+// 2. Provider Interface: Implements Kiota's AuthenticationProvider interface.
 package o365client
 
 import (

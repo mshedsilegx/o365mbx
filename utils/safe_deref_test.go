@@ -1,3 +1,7 @@
+// Package utils provides common utility functions for the application,
+// such as safe pointer dereferencing.
+//
+// This file contains unit tests for the utils package.
 package utils
 
 import (

@@ -63,40 +63,92 @@ $env:PROJECT_HOME = "e:\data\devel\build\code\private\o365mbx"
 | | `TestRunEngine_SaveMessageError` | Verify engine handles storage failures. | Engine handles and returns errors if `SaveMessage` fails. |
 | | `TestRunEngine_AggregatorLogic` | Test internal aggregation pipelines. | Messages correctly flow through aggregator to final folder. |
 | | `TestRunEngine_AggregatorError` | Logic: Aggregator failure handling. | Verifies that message failures trigger `SaveError` and update job stats. |
+| | `TestRunEngine_MessageTimeout` | Hardening: Message execution timeout. | Verifies that messages exceeding `MaxExecutionTimeMsg` are moved to the `ErrorFolder`. |
 | | `TestValidateWorkspacePath` | Security: Prevent path traversal/escapes. | Rejects relative paths, symlinks, and root-level system directories. |
+| | `TestValidateWorkspacePath_Extra` | Hardening: Varied workspace scenarios. | Handles critical paths, existing files, and non-empty directories. |
+| | `TestRunEngine_ValidationFail` | Logic: Workspace validation failure. | RunEngine exits early if workspace path is invalid. |
+| | `TestRunEngine_CreateWorkspaceFail` | Logic: Workspace creation failure. | RunEngine handles errors from FileHandler.CreateWorkspace. |
+| | `TestRunEngine_GetMailboxStatsFail` | Logic: Non-fatal stat failure. | Engine continues if initial mailbox stats retrieval fails. |
+| | `TestRunEngine_SaveStatusReportFail` | Logic: Non-fatal report failure. | Engine logs but does not exit if status report generation fails. |
+| | `TestRunDownloadMode_LoadStateFail` | Logic: State loading error. | runDownloadMode exits if incremental state cannot be loaded. |
+| | `TestRunDownloadMode_SourceFolderFail` | Logic: Folder lookup failure. | runDownloadMode exits if custom source folder cannot be found/created. |
+| | `TestRunDownloadMode_AttachmentFetchErr` | Logic: Attachment discovery failure. | Handled as a non-fatal error; message moved to Error folder. |
+| | `TestRunDownloadMode_QueuingTimeout` | Hardening: Context cancellation race. | Verified that queuing is interrupted safely during message timeouts. |
+| | `TestRunDownloadMode_FinalMetadataError` | Logic: Post-download metadata failure. | Verifies that metadata write errors are captured and reported. |
+| | `TestRunAggregator_FolderCreationFail` | Logic: Aggregator setup failure. | Aggregator exits if destination folders cannot be resolved. |
+| | `TestRunAggregator_MoveMessageFail` | Logic: Relocation failure. | Aggregator logs error but continues if message move fails. |
+| | `TestRunAggregator_UnknownMessageID` | Robustness: Unexpected results. | Aggregator handles results for unknown IDs without crashing. |
 | **Config** | `TestConfig_SetDefaults` | Validate default value injection. | Empty config fields are populated with constants from `config.go`. |
 | | `TestConfig_Validate` | Validate schema and constraints. | Rejects `MaxParallelDownloads < 1` or missing `MailboxName`. |
-| | `TestConfig_ValidateChromiumPath` | Validate Chromium/Chrome existence. | Ensures `ChromiumPath` points to a valid executable file. |
+| | `TestConfig_Validate_ChromiumPaths` | Logic: Browser path validation. | Handles directory paths or non-existent files for ChromiumPath. |
+| | `TestConfig_Validate_Ranges` | Logic: Boundary value validation. | Ensures negative retries, bursts, and invalid enums are rejected. |
 | | `TestLoadConfig` | Logic: Configuration loading from file. | Validates JSON deserialization and path resolution. |
 | **O365Client** | `TestO365Client_GetMessages_httpmock` | Integration: Parse OData Delta responses. | Successfully maps JSON `value` and `@odata.deltaLink` to models. |
 | | `TestO365Client_GetAttachmentRawStream_httpmock` | Integration: Handle `$value` binary streams. | `io.ReadCloser` returned and correctly streams bytes to the caller. |
+| | `TestO365Client_GetAttachmentRawStream_Complex` | integration: native HTTP branches. | Covers URL parsing and transport cloning logic. |
+| | `TestO365Client_GetAttachmentRawStream_FinalBranches` | integration: HTTP status branches. | Handles 404 and request creation failures in raw stream. |
 | | `TestO365Client_GetMessageAttachments_httpmock` | Integration: Fetch attachment metadata. | Correctly parses list of attachments for a specific message. |
-| | `TestO365Client_MoveMessage_httpmock` | Integration: Message relocation. | Verifies correct POST request to Graph `move` endpoint. |
+| | `TestO365Client_MoveMessage_Success` | Integration: Successful move. | Verifies move operation completion. |
 | | `TestO365Client_GetOrCreateFolderIDByName_httpmock` | Integration: Folder management. | Handles folder lookup by name and creation if missing. |
+| | `TestO365Client_GetOrCreateFolderIDByName_Errors` | Integration: Folder failure paths. | Handles API failures during lookup or creation. |
 | | `TestO365Client_GetMailboxHealthCheck_httpmock` | Integration: Aggregate folder metadata. | Calculates `TotalMessages` and `TotalMailboxSize` from folder list. |
+| | `TestO365Client_GetMailboxHealthCheck_InboxAndSorting` | Logic: Health check sorting. | Verifies alphabetical sorting and Inbox-specific date retrieval. |
+| | `TestO365Client_GetMailboxHealthCheck_NilFields` | Robustness: Nil field handling. | Verifies behavior when Graph returns null for counts or names. |
 | | `TestO365Client_GetMessageDetailsForFolder_httpmock` | Integration: Folder content streaming. | Streams message metadata from a specific folder to a channel. |
+| | `TestO365Client_GetMessageDetailsForFolder_EdgeCases` | Integration: Missing recipients. | Handles messages with empty From or To fields. |
+| | `TestO365Client_GetMessageDetailsForFolder_Pagination` | Integration: multi-page details. | Verifies pagination traversal for message metadata. |
 | | `TestO365Client_Errors_httpmock` | Integration: Map OData errors to AppErrors. | HTTP 401/403/429 results in appropriate `apperrors.APIError`. |
 | | `TestO365Client_HandleError` | Logic: Internal error wrapper. | Ensures context deadlines and API errors are correctly processed. |
+| | `TestO365Client_HandleError_WithStatusCode` | Logic: Detailed error mapping. | Extracts status codes from embedded API errors. |
+| | `TestO365Client_ParseFolderSize` | Logic: Data type normalization. | Handles int64, int32, and float64 variants returned by Graph. |
 | | `TestStaticTokenAuthenticationProvider` | Auth: Token injection logic. | Verifies static token header injection for Graph requests. |
-| | `TestO365Client_GetMailboxStats_httpmock` | Integration: Snapshot folder item counts. | Successfully maps Graph API response to a folder-to-count map. |
+| | `TestStaticTokenAuthenticationProvider_HeadersNil` | Auth: Lazy initialization. | Verifies header map creation if missing in RequestInformation. |
+| | `TestO365Client_GetMessages_Incremental` | Integration: Captured delta link. | Verifies captured delta link persistence in state. |
+| | `TestO365Client_GetMessages_Pagination_Errors` | Integration: Handle OData Delta pagination errors. | Handles 500 errors during nextLink traversal or context cancellation. |
+| | `TestO365Client_GetMessages_PaginationBranches` | Integration: Multi-page error paths. | Verified that pagination stops on intermediate page failure. |
+| | `TestO365Client_GetMessages_NilResponse` | integration: null response branch. | Handles cases where the API returns 200 OK but null body. |
 | **FileHandler** | `TestFileHandler_CreateWorkspace` | Security: Workspace initialization. | Verifies directory creation and security checks (symlinks). |
-| | `TestFileHandler_SaveMessage` | Storage: Directory & Metadata creation. | Created `body.txt` and `metadata.json` contain valid, expected content. |
+| | `TestFileHandler_CreateWorkspace_Errors` | Logic: Workspace creation fail. | Handles MkdirAll failures (e.g. parent is a file). |
+| | `TestFileHandler_SaveMessage` | Storage: Directory & Metadata creation. | Created `body.txt` and `metadata.json` contain valid, expected content using `os.OpenRoot`. |
+| | `TestFileHandler_SaveMessage_DetailedPaths` | Logic: Varied body types. | Verifies handling of []byte bodies and Text/PDF format flags. |
 | | `TestFileHandler_SaveMessage_HTML` | Logic: Content-type detection. | Files saved with `.html` extension if content contains `<html>`. |
-| | `TestFileHandler_SaveFileAttachment` | Logic: Standard file attachment storage. | Saves binary content with correct naming and sequence prefix. |
-| | `TestFileHandler_SaveItemAttachment_Extractor` | Logic: MIME parsing and nested extraction. | Extracts body and Level 1 attachments from ItemAttachments. |
+| | `TestFileHandler_SaveFileAttachment` | Logic: Standard file attachment storage. | Saves binary content with correct naming and sequence prefix using `os.OpenRoot`. |
+| | `TestFileHandler_SaveItemAttachment_Extractor` | Logic: MIME parsing and nested extraction. | Extracts body and Level 1 attachments from ItemAttachments using `os.OpenRoot`. |
+| | `TestFileHandler_SaveItemAttachment_Extractor_Errors` | Logic: Extraction failure paths. | Handles stream errors and invalid MIME headers during extraction. |
+| | `TestFileHandler_extractFilesFromEnvelope_WriteError` | Logic: Extraction write fail. | Gracefully handles IO errors during nested file extraction. |
 | | `TestFileHandler_SaveAttachment_Large` | Logic: Threshold-based handling. | Large attachments are handled via correct path and memory logic. |
-| | `TestFileHandler_SaveAttachment_Deprecated` | Logic: Deprecation check. | Rejects calls to deprecated SaveAttachment method. |
-| | `TestFileHandler_WriteAttachmentsToMetadata` | IO: Metadata updates. | Correctly updates `metadata.json` with final attachment list. |
+| | `TestFileHandler_WriteAttachmentsToMetadata` | IO: Metadata updates. | Correctly updates `metadata.json` with final attachment list using `os.OpenRoot`. |
+| | `TestFileHandler_WriteAttachmentsToMetadata_ReadError` | IO: Update read fail. | Handles cases where metadata.json cannot be reopened for update. |
 | | `TestFileHandler_Errors` | Logic: Storage error handling. | Handles permission issues and disk space errors gracefully. |
-| | `TestFileHandler_State` | IO: JSON state persistence. | `state.json` is correctly serialized/deserialized with atomic-like safety. |
+| | `TestFileHandler_SaveState` | IO: JSON state persistence. | `state.json` is correctly serialized/deserialized with atomic safety (temp file + rename) and `os.OpenRoot`. |
+| | `TestFileHandler_SaveState_Errors` | Logic: State write failure. | Handles directory access errors during state saving. |
+| | `TestFileHandler_LoadState` | IO: State retrieval. | Loads delta links from disk; returns empty state if missing. |
+| | `TestFileHandler_LoadState_Malformed` | IO: Corrupted state. | Returns error on invalid JSON state files. |
+| | `TestFileHandler_GetMutex_Concurrency` | Logic: Thread-safe IO. | Verifies internal mutex pooling for safe concurrent file access. |
+| | `TestFileHandler_ToRecipient_Complete` | Logic: Edge case recipients. | Handles nil recipients or missing email addresses in Graph models. |
 | | `TestSanitizeFileName` | Security: OS-safe filename generation. | Replaces `/ \ : * ? " < > |` and `..` with `_`. |
 | | `TestFileHandler_SaveError` | Logic: Per-message error reporting. | Generates `error.json` with timestamps and descriptions on failure. |
+| | `TestFileHandler_SaveError_UnmarshalError` | Logic: Appending to invalid JSON. | Handles corrupted error.json files by overwriting instead of failing. |
 | | `TestFileHandler_SaveStatusReport` | Logic: Job-level status summary. | Generates root `status_<timestamp>.json` with mailbox snapshots. |
+| | `TestFileHandler_SaveStatusReport_MarshalError` | Logic: Report IO failure. | Handles workspace access errors during reporting. |
 | **EmailProcessor** | `TestEmailProcessor_IsHTML` | Logic: Detect HTML content. | Correctly identifies strings containing HTML tags. |
 | | `TestEmailProcessor_CleanHTML` | Logic: HTML to Markdown conversion. | Verifies sanitization and link/image preservation. |
+| | `TestEmailProcessor_CleanHTML_NestedAndStyles` | Logic: Complex HTML layout. | Verified script/style exclusion and nested list handling. |
 | | `TestEmailProcessor_ProcessBody` | Conversion: HTML to Text/PDF logic. | Returns clean text or calls Chromium for PDF based on `ConvertBody` setting. |
+| | `TestEmailProcessor_Initialize_Errors` | Logic: Browser setup failure. | Handles non-existent Chromium paths and empty paths correctly. |
+| | `TestEmailProcessor_ConvertToPDF` | Performance: PDF generation. | Verifies high-fidelity rendering using local browser. |
+| | `TestEmailProcessor_ConvertToPDF_ContextCancelled` | Robustness: Context handling. | Verifies immediate exit on cancelled context before browser call. |
+| | `TestEmailProcessor_ConvertToPDF_InvalidContent` | Robustness: Browser resilience. | Verifies that empty or malformed content doesn't crash the browser. |
+| | `TestEmailProcessor_Close_Nil` | Logic: Graceful shutdown. | Ensures no panics if Close is called on an uninitialized processor. |
+| | `TestEmailProcessor_PoolConcurrency` | Performance: Resource isolation. | Verifies that the page pool correctly handles multiple concurrent renders. |
+| | `TestEmailProcessor_Recycling` | Reliability: Memory management. | Verifies that the browser instance is recycled after a set number of conversions. |
 | **Presenter** | `TestRunHealthCheckMode` | Output: Terminal formatting. | Tabular output contains correct mailbox statistics. |
+| | `TestRunHealthCheckMode_MultipleFolders` | Output: Multi-folder formatting. | Verifies correct tabular alignment for varied folder lists. |
+| | `TestRunHealthCheckMode_TabwriterError` | robustness: writing warning branch. | Verified error handling when stdout/tabwriter fails. |
 | | `TestRunMessageDetailsMode` | Output: Folder content listing. | Correctly displays table of messages for a specific folder. |
+| | `TestRunMessageDetailsMode_LongSubject` | output: formatting truncation. | Verifies that subjects over 75 chars are truncated with "...". |
+| | `TestRunMessageDetailsMode_TabwriterError` | robustness: writing warning branch. | Verified error handling when stdout/tabwriter fails. |
+| | `TestRunMessageDetailsMode_ContextCancelled` | Robustness: Streaming interruption. | Verifies that details streaming stops on context cancellation. |
 | **Utils** | `TestStringValue` | Safety: Nil-safe string deref. | Returns fallback value instead of panicking on nil pointers. |
 | | `TestTimeValue` | Safety: Nil-safe time deref. | Returns fallback time instead of panicking on nil pointers. |
 | | `TestBoolValue` | Safety: Nil-safe bool deref. | Returns fallback bool instead of panicking on nil pointers. |
@@ -106,9 +158,11 @@ $env:PROJECT_HOME = "e:\data\devel\build\code\private\o365mbx"
 | | `TestErrMissingDeltaLink` | Logic: Static error. | Verifies constant error message. |
 | **Main** | `TestLoadAccessToken` | Logic: Token source priority. | Validates `-token-string`, `-token-file`, and `-token-env` behavior. |
 | | `TestIsValidEmail` | Logic: Email validation. | Rejects malformed email addresses for the `-mailbox` flag. |
-| | `TestCLIOverrides` | Logic: Configuration layering. | Verifies CLI flags correctly override `config.json` values. |
+| | `TestValidateFinalConfig` | Logic: Cross-field validation. | Ensures mode-specific requirements (e.g., route mode folders) are met. |
+| | `TestOverrideConfigWithFlags` | Logic: Configuration layering. | Verifies CLI flags correctly override `config.json` values. |
 | | `TestCheckLongPathSupportMock` | Logic: OS capability check. | Verifies that the Windows-specific long path check is executed during startup. |
-| | `TestSignalHandling` | Logic: Process lifecycle. | Verifies that the application initiates graceful shutdown on SIGINT/SIGTERM. |
+| | `TestRun/Healthcheck_mode` | Integration: Diagnostics execution path. | Verifies `RunHealthCheckMode` is invoked correctly from CLI. |
+| | `TestRun_TokenFileRemoval` | Logic: Deferred cleanup of credential files. | Ensures token files are deleted after application exit. |
 | **Resilience** | `TestResilience_DevProxy` | Chaos: Network failure simulation. | Application retries on 429/503 and eventually succeeds or logs error. |
 | | `TestResilience_NestedAttachmentExtraction` | Complex Data: Level 1 Recursion. | Extracts body from nested `.eml` and verifies content against known unique strings. |
 | | `TestResilience_MassiveAttachmentSet` | Pressure: High IO frequency. | Correctly saves 100+ attachments for a single message without resource leaks. |
@@ -121,19 +175,19 @@ $env:PROJECT_HOME = "e:\data\devel\build\code\private\o365mbx"
 
 ## 4. Code Coverage Report
 
-The project maintains high testing standards with an overall statement coverage exceeding the 80% target.
+The project maintains high testing standards with an overall statement coverage exceeding the 90% target.
 
 | Package | Statement Coverage | Status |
 | :--- | :--- | :--- |
 | `o365mbx/apperrors` | 100.0% | **PASS** |
-| `o365mbx/emailprocessor` | 75.3% | **PASS** |
-| `o365mbx/engine` | 85.4% | **PASS** |
-| `o365mbx/filehandler` | 79.4% | **PASS** |
-| `o365mbx/o365client` | 81.4% | **PASS** |
-| `o365mbx/presenter` | 82.7% | **PASS** |
+| `o365mbx/emailprocessor` | 90.2% | **PASS** |
+| `o365mbx/engine` | 94.4% | **PASS** |
+| `o365mbx/filehandler` | 87.9% | **PASS** |
+| `o365mbx/o365client` | 90.9% | **PASS** |
+| `o365mbx/presenter` | 88.5% | **PASS** |
 | `o365mbx/utils` | 100.0% | **PASS** |
-| `o365mbx` (main) | 72.1% | **PASS** |
-| **Project Total** | **~83.6%** | **GOAL MET** |
+| `o365mbx` (main) | 84.3% | **PASS** |
+| **Project Total** | **~91.0%** | **GOAL MET** |
 
 ---
 
@@ -142,6 +196,7 @@ The project maintains high testing standards with an overall statement coverage 
 To ensure tests are realistic, we define JSON and MIME mocks for Dev Proxy that simulate complex "real-world" scenarios in a single comprehensive pipeline (`$env:PROJECT_HOME\tests\resilience-full-pipeline.json`):
 
 - **Chaos Simulation**: All resilience tests run against a 50% transient failure rate (429/503) to verify the application's retry logic and data integrity.
+- **Message Execution Timeout**: Validates that worker threads release resources and route messages to the `Error` folder if processing (body conversion or attachment download) exceeds the configured time limit.
 - **"High-Fidelity" mixed data**: A message containing a mix of `FileAttachment` and `ItemAttachment` types, including Unicode filenames, OS-illegal characters, and zero-byte files.
 - **Recursive MIME extraction**: Multiple messages with nested `.eml` files to validate Level 1 recursion, content parsing, and "canary" string verification.
 - **Massive Attachment Pressure**: Simulated messages with 100+ attachments to stress-test parallel I/O and metadata aggregation.
@@ -193,8 +248,7 @@ To ensure tests are realistic, we define JSON and MIME mocks for Dev Proxy that 
    ```
 
 5. **Run Resilience (Optional)**:
-   Utilize skill: `invoke-devproxy-o365`
-
+   
    **1. Ensure Dev Proxy is running**
    Start the devproxy process as a background task, in a separate window:
    ```powershell
@@ -229,11 +283,17 @@ To ensure tests are realistic, we define JSON and MIME mocks for Dev Proxy that 
    ```
 
 6. **Run PDF Conversion Tests (Optional)**:
-   The PDF conversion test is isolated to prevent unexpected security alerts. It only runs if a valid Chromium path is provided.
+   The PDF conversion tests are isolated because they require a headless Chromium/Chrome binary. These tests only run if the `PDF_TEST_CHROMIUM_PATH` environment variable is set.
 
    ```powershell
-   $env:PDF_TEST_CHROMIUM_PATH = "C:\Program Files\Google\Chrome\Application\chrome.exe" # Replace with your path
-   go test -v -run TestEmailProcessor_ConvertToPDF ./emailprocessor/
+   # Set the path to your Chrome or Chromium executable
+   # Windows
+   $env:PDF_TEST_CHROMIUM_PATH = "d:\inet\www\chromium\bin\chrome.exe"
+   # Linux
+   export PDF_TEST_CHROMIUM_PATH="/var/opt/chromium/chrome"
+
+   # Run all PDF-related tests in the emailprocessor package
+   go test -v -run "TestEmailProcessor_(ConvertToPDF|PoolConcurrency|Recycling)" ./emailprocessor/
    ```
 
 

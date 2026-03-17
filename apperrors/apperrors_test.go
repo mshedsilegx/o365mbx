@@ -1,3 +1,7 @@
+// Package apperrors defines custom error types for structured error handling
+// throughout the application.
+//
+// This file contains unit tests for the apperrors package.
 package apperrors
 
 import (

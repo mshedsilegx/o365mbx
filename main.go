@@ -1,5 +1,22 @@
 // Package main is the entry point for the o365mbx application.
-// It handles CLI argument parsing, configuration loading, and dependency injection.
+//
+// OBJECTIVE:
+// This application is designed to download and process email messages and attachments
+// from a Microsoft 365 (O365) mailbox using the Microsoft Graph API. It supports
+// full, incremental, and "route" (move-after-process) modes, along with health checks
+// and various body conversion options (Text, PDF).
+//
+// CORE SECTIONS:
+// 1. Argument Parsing: Uses flag.FlagSet to handle CLI arguments and configuration overrides.
+// 2. Configuration: Loads settings from JSON or CLI, validates them, and manages authentication tokens.
+// 3. Dependency Injection: Initializes core services (O365Client, EmailProcessor, FileHandler) and injects them into the Engine.
+// 4. Execution: Runs either the diagnostic Health Check or the primary download Engine (RunEngine).
+//
+// CORE FUNCTIONALITY:
+// - Parallelized Extraction: Downloads multiple messages and attachments concurrently.
+// - Content Transformation: Sanitizes HTML and optionally converts bodies to PDF or Text.
+// - Reliable Storage: Persists data to a structured workspace with detailed metadata and state tracking.
+// - Mailbox Management: Automates message relocation (routing) based on processing success or failure.
 package main
 
 import (
@@ -31,6 +48,8 @@ func main() {
 	}
 }
 
+// run is the internal entry point that handles flag parsing, configuration setup,
+// and execution of either the diagnostic health check or the main engine.
 func run(args []string, out io.Writer) error {
 	// --- Pre-flight Checks ---
 	checkLongPathSupport()
@@ -41,7 +60,7 @@ func run(args []string, out io.Writer) error {
 	// --- Flag Definition ---
 	// We use a local FlagSet to make run() testable and avoid global state issues.
 	fs := flag.NewFlagSet(args[0], flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
+	fs.SetOutput(out)
 
 	configPath := fs.String("config", "", "Path to a JSON configuration file.")
 	tokenString := fs.String("token-string", "", "JWT token as a string.")
@@ -67,12 +86,12 @@ func run(args []string, out io.Writer) error {
 	initialBackoffSeconds := fs.Int("initial-backoff-seconds", 5, "Initial backoff in seconds for retries.")
 	chunkSizeMB := fs.Int("chunk-size-mb", 8, "Chunk size in MB for large attachment downloads.")
 	largeAttachmentThresholdMB := fs.Int("large-attachment-threshold-mb", 20, "Threshold in MB for large attachments.")
-	stateSaveInterval := fs.Int("state-save-interval", 100, "Save state every N messages.")
 	bandwidthLimitMBs := fs.Float64("bandwidth-limit-mbs", 0, "Bandwidth limit in MB/s for downloads (0 for disabled).")
 	convertBody := fs.String("convert-body", "none", "Convert body to 'text' or 'pdf'. Default is 'none'.")
 	chromiumPath := fs.String("chromium-path", "", "Path to headless chromium binary for PDF conversion.")
 	msgHandler := fs.String("msg-handler", "raw", "Handler for .msg/.eml attachments: 'raw' or 'extractor'.")
 	attachmentExtractionL1 := fs.String("attachment-extraction-l1", "default", "Level 1 extraction for .msg/.eml: 'default' (attachments only) or 'inlines' (attachments + inlines).")
+	maxExecutionTimeMsg := fs.Int("max-execution-time-msg", 120, "Maximum time in seconds to spend on one email message.")
 
 	if err := fs.Parse(args[1:]); err != nil {
 		return err
@@ -91,7 +110,7 @@ func run(args []string, out io.Writer) error {
 	}
 
 	// --- Command-line Override ---
-	overrideConfigWithFlagsLocal(cfg, fs, configPath, tokenString, tokenFile, tokenEnv, removeTokenFile, mailboxName, workspacePath, debug, processingMode, inboxFolder, stateFilePath, processedFolder, errorFolder, timeoutSeconds, maxParallelDownloads, apiCallsPerSecond, apiBurst, maxRetries, initialBackoffSeconds, chunkSizeMB, largeAttachmentThresholdMB, stateSaveInterval, bandwidthLimitMBs, convertBody, chromiumPath, msgHandler, attachmentExtractionL1, healthCheck, messageDetailsFolder)
+	overrideConfigWithFlagsLocal(cfg, fs, configPath, tokenString, tokenFile, tokenEnv, removeTokenFile, mailboxName, workspacePath, debug, processingMode, inboxFolder, stateFilePath, processedFolder, errorFolder, timeoutSeconds, maxParallelDownloads, apiCallsPerSecond, apiBurst, maxRetries, initialBackoffSeconds, chunkSizeMB, largeAttachmentThresholdMB, bandwidthLimitMBs, convertBody, chromiumPath, msgHandler, attachmentExtractionL1, healthCheck, messageDetailsFolder, maxExecutionTimeMsg)
 
 	// --- Logging Setup ---
 	log.SetFormatter(&log.TextFormatter{FullTimestamp: true})
@@ -134,20 +153,30 @@ func run(args []string, out io.Writer) error {
 	// --- Dependency Injection ---
 	// Initialize core services and inject them into the engine.
 	logger := log.WithFields(log.Fields{}) // Create a base logger
-	o365Client, err := o365client.NewO365Client(accessToken, time.Duration(cfg.HTTPClientTimeoutSeconds)*time.Second, cfg.MaxRetries, cfg.InitialBackoffSeconds, cfg.APICallsPerSecond, cfg.APIBurst, rng)
+	o365Client, err := o365client.NewO365Client(accessToken, rng)
 	if err != nil {
 		return fmt.Errorf("error creating O365 client: %w", err)
 	}
 	emailProcessor := emailprocessor.NewEmailProcessor(logger)
+	if cfg.ConvertBody == "pdf" {
+		if err := emailProcessor.Initialize(ctx, cfg.ChromiumPath, cfg.MaxParallelDownloads); err != nil {
+			return fmt.Errorf("failed to initialize email processor: %w", err)
+		}
+		defer func() {
+			if err := emailProcessor.Close(); err != nil {
+				log.Errorf("Error closing email processor: %v", err)
+			}
+		}()
+	}
 	fileHandler := filehandler.NewFileHandler(cfg.WorkspacePath, o365Client, emailProcessor, cfg.LargeAttachmentThresholdMB, cfg.ChunkSizeMB, cfg.BandwidthLimitMBs, cfg.MsgHandler, cfg.AttachmentExtractionL1, logger)
 
 	// --- Health Check or Main Engine Execution ---
 	// Execute either the diagnostic health check or the primary download engine.
 	if cfg.HealthCheck {
 		if cfg.MessageDetailsFolder != "" {
-			err = presenter.RunMessageDetailsMode(ctx, o365Client, cfg.MailboxName, cfg.MessageDetailsFolder)
+			err = presenter.RunMessageDetailsMode(ctx, o365Client, cfg.MailboxName, cfg.MessageDetailsFolder, out)
 		} else {
-			err = presenter.RunHealthCheckMode(ctx, o365Client, cfg.MailboxName)
+			err = presenter.RunHealthCheckMode(ctx, o365Client, cfg.MailboxName, out)
 		}
 		if err != nil {
 			return fmt.Errorf("diagnostic run failed: %w", err)
@@ -166,12 +195,20 @@ func run(args []string, out io.Writer) error {
 		}
 	}()
 
-	if err := engine.RunEngine(ctx, cfg, o365Client, emailProcessor, fileHandler, accessToken, version); err != nil {
+	if err := engine.RunEngine(ctx, cfg, o365Client, emailProcessor, fileHandler, version); err != nil {
 		return fmt.Errorf("engine failed: %w", err)
 	}
 	return nil
 }
 
+// loadAccessToken resolves the access token from one of the three supported sources:
+// literal string, file path, or environment variable. It enforces that exactly
+// one source is provided.
+//
+// SUPPORTED SOURCES:
+// 1. -token-string: Literal JWT string.
+// 2. -token-file: Path to a file containing the JWT.
+// 3. -token-env: Read from JWT_TOKEN environment variable.
 func loadAccessToken(cfg *engine.Config) (string, error) {
 	sourceCount := 0
 	if cfg.TokenString != "" {
@@ -220,7 +257,7 @@ func isValidEmail(email string) bool {
 	return emailRegex.MatchString(email)
 }
 
-func overrideConfigWithFlagsLocal(cfg *engine.Config, fs *flag.FlagSet, configPath, tokenString, tokenFile *string, tokenEnv *bool, removeTokenFile *bool, mailboxName, workspacePath *string, debug *bool, processingMode, inboxFolder, stateFilePath, processedFolder, errorFolder *string, timeoutSeconds, maxParallelDownloads *int, apiCallsPerSecond *float64, apiBurst, maxRetries, initialBackoffSeconds, chunkSizeMB, largeAttachmentThresholdMB, stateSaveInterval *int, bandwidthLimitMBs *float64, convertBody, chromiumPath, msgHandler, attachmentExtractionL1 *string, healthCheck *bool, messageDetailsFolder *string) {
+func overrideConfigWithFlagsLocal(cfg *engine.Config, fs *flag.FlagSet, configPath, tokenString, tokenFile *string, tokenEnv *bool, removeTokenFile *bool, mailboxName, workspacePath *string, debug *bool, processingMode, inboxFolder, stateFilePath, processedFolder, errorFolder *string, timeoutSeconds, maxParallelDownloads *int, apiCallsPerSecond *float64, apiBurst, maxRetries, initialBackoffSeconds, chunkSizeMB, largeAttachmentThresholdMB *int, bandwidthLimitMBs *float64, convertBody, chromiumPath, msgHandler, attachmentExtractionL1 *string, healthCheck *bool, messageDetailsFolder *string, maxExecutionTimeMsg *int) {
 	// Override config file settings with any flags set on the command line.
 	fs.Visit(func(f *flag.Flag) {
 		switch f.Name {
@@ -264,8 +301,6 @@ func overrideConfigWithFlagsLocal(cfg *engine.Config, fs *flag.FlagSet, configPa
 			cfg.ChunkSizeMB = *chunkSizeMB
 		case "large-attachment-threshold-mb":
 			cfg.LargeAttachmentThresholdMB = *largeAttachmentThresholdMB
-		case "state-save-interval":
-			cfg.StateSaveInterval = *stateSaveInterval
 		case "bandwidth-limit-mbs":
 			cfg.BandwidthLimitMBs = *bandwidthLimitMBs
 		case "convert-body":
@@ -280,10 +315,14 @@ func overrideConfigWithFlagsLocal(cfg *engine.Config, fs *flag.FlagSet, configPa
 			cfg.HealthCheck = *healthCheck
 		case "message-details":
 			cfg.MessageDetailsFolder = *messageDetailsFolder
+		case "max-execution-time-msg":
+			cfg.MaxExecutionTimeMsg = *maxExecutionTimeMsg
 		}
 	})
 }
 
+// validateFinalConfig performs cross-field validation and ensures all required
+// settings are present for the chosen processing mode.
 func validateFinalConfig(cfg *engine.Config) error {
 	if cfg.MailboxName == "" {
 		return fmt.Errorf("mailbox name is a required argument (set via -mailbox or in config file)")

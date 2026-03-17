@@ -1,5 +1,15 @@
 // Package utils provides common utility functions for the application,
 // such as safe pointer dereferencing.
+//
+// OBJECTIVE:
+// This package contains stateless, reusable helper functions that simplify
+// common operations used across multiple packages in the application.
+//
+// CORE FUNCTIONALITY:
+//  1. Safe Dereferencing: Provides "Value" helpers (StringValue, TimeValue, etc.)
+//     that safely dereference pointers and return a default value if the pointer is nil.
+//     This is particularly useful when working with the Microsoft Graph SDK's model
+//     where almost all fields are pointers.
 package utils
 
 import (

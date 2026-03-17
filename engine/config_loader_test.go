@@ -1,3 +1,7 @@
+// Package engine implements the core business logic and orchestrates the parallelized
+// email download and processing pipeline.
+//
+// This file contains unit tests for the configuration loading logic.
 package engine
 
 import (
